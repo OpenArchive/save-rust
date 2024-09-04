@@ -1,0 +1,4 @@
+module HelloWorld {
+    header "hello.h"
+    export *
+}
