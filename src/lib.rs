@@ -1,55 +1,78 @@
-use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use serde::{Deserialize, Serialize};
 
-#[no_mangle]
-pub extern "C" fn rust_greeting(to: *const c_char) -> *mut c_char {
-    let c_str = unsafe { CStr::from_ptr(to) };
-    let recipient = match c_str.to_str() {
-        Err(_) => "there",
-        Ok(string) => string,
-    };
-
-    CString::new("Hello ".to_owned() + recipient).unwrap().into_raw()
+#[derive(Serialize, Deserialize)]
+struct Message {
+    content: String,
 }
 
-#[no_mangle]
-pub extern "C" fn rust_greeting_free(s: *mut c_char) {
-    unsafe {
-        if s.is_null() { return }
-        let _ = CString::from_raw(s);
-    };
+async fn hello() -> impl Responder {
+    HttpResponse::Ok().body("Hello from Rust server on Android using Unix socket!")
 }
 
-// Android-specific wrapper (only compiled when targeting Android)
+async fn echo(message: web::Json<Message>) -> impl Responder {
+    HttpResponse::Ok().json(message.0)
+}
+
 #[cfg(target_os = "android")]
 mod android {
-    use super::*;
     use jni::JNIEnv;
     use jni::objects::{JClass, JString};
     use jni::sys::jstring;
+    use actix_web::{web, App, HttpServer};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use std::fs;
 
     #[no_mangle]
-    pub extern "system" fn Java_net_opendasharchive_openarchive_features_main_Rusty_rust_1greeting<'local>(
-        mut env: JNIEnv<'local>,
-        _: JClass<'local>,
-        j_recipient: JString<'local>
-    ) -> jstring {
-        // Convert JString to Rust str
-        let recipient = env.get_string(&j_recipient).expect("Invalid string input");
-        let recipient_str = recipient.to_str().unwrap();
+    pub extern "system" fn Java_net_opendasharchive_openarchive_features_main_RustBridge_startServer(env: JNIEnv, _: JClass, socket_path: JString) -> jstring {
+        
+        let socket_path: String = unsafe {
+            env.get_string_unchecked(&socket_path).expect("Couldn't get socket path string").into()
+        };
 
-        // Call the core rust_greeting function
-        let output = rust_greeting(recipient_str.as_ptr() as *const c_char);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        
+        runtime.block_on(async {
+            // Remove the socket file if it already exists
+            if fs::metadata(&socket_path).is_ok() {
+                fs::remove_file(&socket_path).unwrap();
+            }
+    
+            let server = HttpServer::new(|| {
+                App::new()
+                    .route("/echo", web::post().to(echo))
+            })
+            .bind_uds(&socket_path).unwrap()
+            .run();
+    
+            let server = Arc::new(Mutex::new(Some(server)));
+            let server_clone = server.clone();
+    
+            tokio::spawn(async move {
+                if let Some(server) = server_clone.lock().await.take() {
+                    server.await.unwrap();
+                }
+            });
+        });
+    
+        let output = env
+            .new_string(format!("Server started on Unix socket: {}", socket_path))
+            .expect("Couldn't create java string!");
+        output.into_raw()
+    }
 
-        // Convert the result back to a jstring
-        let output_jstring = env.new_string(unsafe { 
-            CStr::from_ptr(output).to_str().unwrap() 
-        }).expect("Couldn't create Java string!");
+    async fn echo(message: web::Json<serde_json::Value>) -> web::Json<serde_json::Value> {
+        message
+    }
 
-        // Free the CString created in rust_greeting
-        rust_greeting_free(output);
-
-        // Return the jstring
-        output_jstring.into_raw()
+    #[no_mangle]
+    pub extern "system" fn Java_net_opendasharchive_openarchive_features_main_RustBridge_echo<'local>(env: JNIEnv, _: JClass, input: JString) -> jstring {
+        let input: String = unsafe {
+            env.get_string_unchecked(&input).expect("Couldn't get java string!").into()
+        };
+        let output = format!("Echo: {}", input);
+        let output = env.new_string(output).expect("Couldn't create java string!");
+        output.into_raw()
     }
 }
