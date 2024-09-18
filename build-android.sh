@@ -6,7 +6,8 @@ mkdir $BUILD_DIR
 cd $BUILD_DIR
 
 # Create the jniLibs build directory
-JNI_DIR=jniLibs
+# JNI_DIR=jniLibs
+JNI_DIR=$HOME/Projects/save-android/app/src/main/jniLibs
 mkdir -p $JNI_DIR
 
 # Set up cargo-ndk
@@ -25,6 +26,7 @@ cargo ndk -o $JNI_DIR \
         -t x86 \
         -t x86_64 \
         build --release 
+
 
 # Archive the dynamic libs
 # cd $JNI_DIR

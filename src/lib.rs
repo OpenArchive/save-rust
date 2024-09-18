@@ -3,6 +3,7 @@ use actix_web::get;
 use actix_web::post;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_json::json;
 
 #[derive(Serialize, Deserialize)]
 struct Message {
@@ -30,12 +31,28 @@ mod server {
         }))
     }
 
+    #[get("/api/groups")]
+    async fn get_groups() -> impl Responder {
+        HttpResponse::Ok().json(json!([
+            {
+                "name": "Group A"
+            },
+            {
+                "name": "Group B"
+            },
+            {
+                "name": "Group C"
+            }
+        ]))
+    }
+
     pub async fn start_server(socket_path: &str) -> std::io::Result<()> {
         HttpServer::new(|| {
             App::new()
             .service(hello)
             .service(echo)
             .service(status)
+            .service(get_groups)
         })
         .bind_uds(&socket_path).unwrap()
         .run()
@@ -52,7 +69,7 @@ mod android {
     use std::fs;
 
     #[no_mangle]
-    pub extern "system" fn Java_net_opendasharchive_openarchive_features_main_RustyServerManager_startServer(env: JNIEnv, _: JClass, socket_path: JString) -> jstring {
+    pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_SnowbirdBridge_startServer(env: JNIEnv, _: JClass, socket_path: JString) -> jstring {
         let socket_path: String = unsafe {
             env
                 .get_string_unchecked(&socket_path)
