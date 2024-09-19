@@ -7,9 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::json;
 use save_dweb_backend::backend::Backend;
-use save_dweb_backend::common::DHTEntity;
-use save_dweb_backend::group::Group;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Serialize, Deserialize)]
 struct Message {
@@ -17,10 +15,12 @@ struct Message {
 }
 
 mod server {
+    use save_dweb_backend::common::DHTEntity;
+
     use super::*;
 
     struct AppState {
-        backend: Arc<Backend>,
+        backend: Arc<Mutex<Backend>>,
     }
 
     #[get("/")]
@@ -43,7 +43,11 @@ mod server {
 
     #[get("/api/groups")]
     async fn get_groups(data: web::Data<AppState>) -> Result<impl Responder, Error> {
-        let groups: Vec<Box<Group>> = data.backend.list_groups().await
+        let backend = data.backend.lock().map_err(|_| {
+            actix_web::error::ErrorInternalServerError("Failed to acquire backend lock")
+        })?;
+
+        let groups = backend.list_groups().await
             .map_err(|e| {
                 eprintln!("Error listing groups: {:?}", e);
                 actix_web::error::ErrorInternalServerError("Failed to retrieve groups")
@@ -64,22 +68,42 @@ mod server {
         Ok(HttpResponse::Ok().json(json!({ "groups": group_data })))
     }
 
-    pub async fn start_server(socket_path: &str) -> std::io::Result<()> {
-        let backend = Arc::new(Backend::new(socket_path.as_ref(), 8080).expect("Unable to create Backend"));
-        
-        let app_state = web::Data::new(AppState {
-            backend: backend.clone(),
-        });
+    #[post("/api/groups")]
+    async fn create_group(data: web::Data<AppState>) -> Result<impl Responder, Error> {
+        let mut backend = data.backend.lock().map_err(|_| {
+            actix_web::error::ErrorInternalServerError("Failed to acquire backend lock")
+        })?;
+    
+        let group = backend.create_group().await
+            .map_err(|e| {
+                eprintln!("Error creating group: {:?}", e);
+                actix_web::error::ErrorInternalServerError(format!("Failed to create group: {}", e))
+            })?;
+    
+        Ok(HttpResponse::Ok().json(json!({
+            "name": "My Group"
+        })))
+    }
 
+    pub async fn start_server(socket_path: &str) -> std::io::Result<()> {
+        let backend = Arc::new(Mutex::new(
+            Backend::new(socket_path.as_ref(), 8080).expect("Unable to create Backend")
+        ));
+        
         HttpServer::new(move || {
+            let app_state = web::Data::new(AppState {
+                backend: backend.clone(),
+            });
+
             App::new()
-            .app_data(app_state.clone())
+            .app_data(app_state)
             .service(hello)
             .service(echo)
             .service(status)
             .service(get_groups)
+            .service(create_group)
         })
-        .bind_uds(&socket_path).unwrap()
+        .bind_uds(socket_path)?
         .run()
         .await
     }
