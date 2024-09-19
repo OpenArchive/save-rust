@@ -1,9 +1,15 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, HttpResponse, HttpServer, Responder, Error};
 use actix_web::get;
 use actix_web::post;
+use eyre::Report;
+use futures::future;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::json;
+use save_dweb_backend::backend::Backend;
+use save_dweb_backend::common::DHTEntity;
+use save_dweb_backend::group::Group;
+use std::sync::Arc;
 
 #[derive(Serialize, Deserialize)]
 struct Message {
@@ -12,6 +18,10 @@ struct Message {
 
 mod server {
     use super::*;
+
+    struct AppState {
+        backend: Arc<Backend>,
+    }
 
     #[get("/")]
     async fn hello() -> impl Responder {
@@ -32,23 +42,38 @@ mod server {
     }
 
     #[get("/api/groups")]
-    async fn get_groups() -> impl Responder {
-        HttpResponse::Ok().json(json!([
-            {
-                "name": "Group A"
-            },
-            {
-                "name": "Group B"
-            },
-            {
-                "name": "Group C"
-            }
-        ]))
+    async fn get_groups(data: web::Data<AppState>) -> Result<impl Responder, Error> {
+        let groups: Vec<Box<Group>> = data.backend.list_groups().await
+            .map_err(|e| {
+                eprintln!("Error listing groups: {:?}", e);
+                actix_web::error::ErrorInternalServerError("Failed to retrieve groups")
+            })?;
+    
+        let group_data_futures: Vec<_> = groups.iter().map(|group| async move {
+            let name_result: Result<String, Report> = group.get_name().await;
+            let name = name_result.unwrap_or_else(|e| format!("Error: {}", e));
+            
+            json!({
+                "name": name,
+                "id": group.id(),
+            })
+        }).collect();
+    
+        let group_data: Vec<serde_json::Value> = future::join_all(group_data_futures).await;
+    
+        Ok(HttpResponse::Ok().json(json!({ "groups": group_data })))
     }
 
     pub async fn start_server(socket_path: &str) -> std::io::Result<()> {
-        HttpServer::new(|| {
+        let backend = Arc::new(Backend::new(socket_path.as_ref(), 8080).expect("Unable to create Backend"));
+        
+        let app_state = web::Data::new(AppState {
+            backend: backend.clone(),
+        });
+
+        HttpServer::new(move || {
             App::new()
+            .app_data(app_state.clone())
             .service(hello)
             .service(echo)
             .service(status)
