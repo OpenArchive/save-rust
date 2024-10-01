@@ -1,36 +1,39 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Responder, Error};
-use actix_web::get;
-use actix_web::post;
-use eyre::Report;
-use futures::future;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use serde_json::json;
-use save_dweb_backend::backend::Backend;
-use std::sync::{Arc, Mutex};
+#[cfg(target_os = "android")]
+pub mod android_bridge;
 
-#[derive(Serialize, Deserialize)]
-struct Message {
-    content: String,
-}
+pub mod logging;
 
 mod server {
+    use actix_web::{web, App, HttpResponse, HttpServer, Responder, Error};
+    use actix_web::error::ErrorInternalServerError;
+    use actix_web::{get, post};
+    use crate::log_debug;
+    use eyre::Report;
+    use futures::future;
+    use std::path::Path;
+    use std::sync::Arc;
+    use tokio::sync::Mutex as TokioMutex;
+    use save_dweb_backend::backend::Backend;
     use save_dweb_backend::common::DHTEntity;
+    use serde_json::json;
+    use std::ffi::CString;
+    use std::os::raw::{c_char, c_int};
 
-    use super::*;
+    #[link(name = "log")]
+    extern "C" {
+        pub fn __android_log_print(prio: c_int, tag: *const c_char, fmt: *const c_char, ...) -> c_int;
+    }
+
+    pub fn android_log(prio: i32, tag: &str, msg: &str) {
+        let tag = CString::new(tag).unwrap();
+        let msg = CString::new(msg).unwrap();
+        unsafe {
+            __android_log_print(prio, tag.as_ptr(), msg.as_ptr());
+        }
+    }
 
     struct AppState {
-        backend: Arc<Mutex<Backend>>,
-    }
-
-    #[get("/")]
-    async fn hello() -> impl Responder {
-        HttpResponse::Ok().body("Hello from Rust server!")
-    }
-
-    #[post("/echo")]
-    async fn echo(message: web::Json<Value>) -> impl Responder {
-        HttpResponse::Ok().json(message.0)
+        backend: Arc<TokioMutex<Backend>>,
     }
 
     #[get("/status")]
@@ -43,9 +46,7 @@ mod server {
 
     #[get("/api/groups")]
     async fn get_groups(data: web::Data<AppState>) -> Result<impl Responder, Error> {
-        let backend = data.backend.lock().map_err(|_| {
-            actix_web::error::ErrorInternalServerError("Failed to acquire backend lock")
-        })?;
+        let backend = data.backend.lock().await;
 
         let groups = backend.list_groups().await
             .map_err(|e| {
@@ -70,11 +71,9 @@ mod server {
 
     #[post("/api/groups")]
     async fn create_group(data: web::Data<AppState>) -> Result<impl Responder, Error> {
-        let mut backend = data.backend.lock().map_err(|_| {
-            actix_web::error::ErrorInternalServerError("Failed to acquire backend lock")
-        })?;
+        let mut backend = data.backend.lock().await;
     
-        let group = backend.create_group().await
+        let _group = backend.create_group().await
             .map_err(|e| {
                 eprintln!("Error creating group: {:?}", e);
                 actix_web::error::ErrorInternalServerError(format!("Failed to create group: {}", e))
@@ -86,19 +85,35 @@ mod server {
     }
 
     pub async fn start_server(socket_path: &str) -> std::io::Result<()> {
-        let backend = Arc::new(Mutex::new(
-            Backend::new(socket_path.as_ref(), 8080).expect("Unable to create Backend")
+        log_debug!("RustNative", "start_server: Using socket path: {:?}", socket_path);
+        
+        let backend_path = Path::new("/data/user/0/net.opendasharchive.openarchive.debug/files/backend");
+
+        let backend = Arc::new(TokioMutex::new(
+            Backend::new(backend_path, 8080).expect("Unable to create Backend")
         ));
         
+        log_debug!("RustNative", "start_verver: step 10");
+
+        // {
+        //     let mut backend_guard = backend.lock().await;
+        //     if let Err(e) = backend_guard.start().await {
+        //         ErrorInternalServerError(format!("Failed to start server: {}", e));
+        //         return Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()));
+        //     }
+        // } 
+
+        log_debug!("RustNative", "start_verver: step 20");
+
         HttpServer::new(move || {
             let app_state = web::Data::new(AppState {
                 backend: backend.clone(),
             });
 
+            log_debug!("RustNative", "start_verver: step 30");
+
             App::new()
             .app_data(app_state)
-            .service(hello)
-            .service(echo)
             .service(status)
             .service(get_groups)
             .service(create_group)
@@ -108,46 +123,3 @@ mod server {
         .await
     }
 }
-
-#[cfg(target_os = "android")]
-mod android {
-    use super::*;
-    use jni::JNIEnv;
-    use jni::objects::{JClass, JString};
-    use jni::sys::jstring;
-    use std::fs;
-
-    #[no_mangle]
-    pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_SnowbirdBridge_startServer(env: JNIEnv, _: JClass, socket_path: JString) -> jstring {
-        let socket_path: String = unsafe {
-            env
-                .get_string_unchecked(&socket_path)
-                .expect("Couldn't get socket path string")
-                .into()
-        };
-
-        let thread_socket_path = socket_path.clone();
-
-        if fs::metadata(&socket_path).is_ok() {
-            fs::remove_file(&thread_socket_path).unwrap();
-        }
-
-        std::thread::spawn(move || {
-            let runtime = tokio::runtime::Runtime::new().unwrap();
-            runtime.block_on(async {
-                server::start_server(&thread_socket_path).await.unwrap();
-            });
-        });
-    
-        let output = env
-            .new_string(format!("Server started on Unix socket: {}", socket_path))
-            .expect("Couldn't create java string!");
-
-        output.into_raw()
-    }
-}
-
-#[cfg(feature = "ios")]
-mod ios { 
-    // Placeholder
- }

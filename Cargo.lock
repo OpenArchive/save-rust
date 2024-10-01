@@ -4955,6 +4955,7 @@ dependencies = [
  "futures",
  "jni",
  "lazy_static",
+ "log",
  "save-dweb-backend",
  "serde",
  "serde_json",
