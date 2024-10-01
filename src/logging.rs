@@ -1,6 +1,23 @@
 // Re-export android_log if it's defined elsewhere
+// #[cfg(target_os = "android")]
+// pub use crate::android_log;
+
+use std::ffi::CString;
+use std::os::raw::{c_char, c_int};
+
+#[link(name = "log")]
+extern "C" {
+    pub fn __android_log_print(prio: c_int, tag: *const c_char, fmt: *const c_char, ...) -> c_int;
+}
+
 #[cfg(target_os = "android")]
-pub use crate::server::android_log;
+pub fn android_log(prio: i32, tag: &str, msg: &str) {
+    let tag = CString::new(tag).unwrap();
+    let msg = CString::new(msg).unwrap();
+    unsafe {
+        __android_log_print(prio, tag.as_ptr(), msg.as_ptr());
+    }
+}
 
 #[cfg(not(target_os = "android"))]
 pub fn android_log(level: i32, tag: &str, msg: &str) {
@@ -17,7 +34,7 @@ pub const LOG_LEVEL_ERROR: i32 = 6;
 #[macro_export]
 macro_rules! android_log_print {
     ($level:expr, $tag:expr, $($arg:tt)*) => {
-        $crate::server::android_log($level, $tag, &format!("[{}:{}] {}", file!(), line!(), format_args!($($arg)*)))
+        android_log($level, $tag, &format!("[{}:{}] {}", file!(), line!(), format_args!($($arg)*)))
     }
 }
 
