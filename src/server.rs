@@ -10,7 +10,8 @@ pub mod server {
     use save_dweb_backend::backend::Backend;
     use save_dweb_backend::common::DHTEntity;
     use serde_json::json;
-    use crate::log_debug;
+    use std::fs;
+    use crate::{log_debug, log_error};
     use crate::logging::android_log;
 
     struct AppState {
@@ -65,18 +66,43 @@ pub mod server {
         })))
     }
 
-    pub async fn start_server(socket_path: &str) -> std::io::Result<()> {
+    pub async fn start(socket_path: &str) -> std::io::Result<()> {
         log_debug!("RustNative", "start_server: Using socket path: {:?}", socket_path);
+
+        if env::var("HOME").is_err() {
+            env::set_var("HOME", "/data/user/0/net.opendasharchive.openarchive.debug/files");
+        }
+        
+        log_debug!("RustNative", "start_verver: step 4");
+
+        if fs::exists(&socket_path).is_ok() {
+            log_debug!("RustNative", "Socket path exists. Removing.");
+            // fs::remove_file(&socket_path).unwrap();
+            log_debug!("RustNative", "start_verver: step 6");
+        }
         
         let backend_path = Path::new(socket_path);
+
+        log_debug!("RustNative", "start_verver: step 7");
 
         let backend = Arc::new(TokioMutex::new(
             Backend::new(backend_path, 8080).expect("Unable to create Backend")
         ));
         
+        log_debug!("RustNative", "start_verver: step 8");
+
+        let backend_clone = Arc::clone(&backend);
+
+        match backend_clone.lock().await.start().await {
+            Ok(_) => log_debug!("RustNative", "Backend started successfully"),
+            Err(e) => log_error!("RustNative", "Failed to start backend: {}", e)
+        }
+
         log_debug!("RustNative", "start_verver: step 10");
 
         HttpServer::new(move || {
+            log_debug!("RustNative", "start_verver: step 20");
+
             let app_state = web::Data::new(AppState {
                 backend: backend.clone(),
             });

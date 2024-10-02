@@ -14,11 +14,14 @@ crate-type = ["staticlib", "cdylib"]
 android = []
 ios = []
 
+[build]
+target = "aarch64-linux-android"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 save-dweb-backend = { git = "https://github.com/OpenArchive/save-dweb-backend" }
-tokio = { version = "1.40.0", features = ["full"] }
+tokio = { version = "1.40.0",  default-features = false, features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 crossbeam-channel = "0.5"
@@ -27,7 +30,10 @@ actix-web = { version = "4", features = ["macros"] }
 futures = "0.3"
 eyre = "0.6.12"
 log = "0.4.22"
+veilid-core = { git = "https://gitlab.com/veilid/veilid.git", version = "0.3.4" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21.1"
-tokio = { version = "1.40.0", features = ["rt-multi-thread", "time", "fs"] }
+tokio = { version = "1.40.0",  default-features = false,  features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
+veilid-core = { git = "https://gitlab.com/veilid/veilid.git", version = "0.3.4" }
+ndk-context = "0.1.1"
