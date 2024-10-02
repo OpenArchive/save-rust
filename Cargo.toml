@@ -14,9 +14,6 @@ crate-type = ["staticlib", "cdylib"]
 android = []
 ios = []
 
-[build]
-target = "aarch64-linux-android"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -36,4 +33,3 @@ veilid-core = { git = "https://gitlab.com/veilid/veilid.git", version = "0.3.4" 
 jni = "0.21.1"
 tokio = { version = "1.40.0",  default-features = false,  features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
 veilid-core = { git = "https://gitlab.com/veilid/veilid.git", version = "0.3.4" }
-ndk-context = "0.1.1"

@@ -1,6 +1,5 @@
 use jni::{objects::JClass, objects::JObject, objects::JString, JNIEnv};
 use jni::sys::jstring;
-use ndk_context::android_context;
 use veilid_core::veilid_core_setup_android;
 use crate::server::server::start;
 

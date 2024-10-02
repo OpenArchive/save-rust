@@ -4863,7 +4863,6 @@ dependencies = [
  "jni",
  "lazy_static",
  "log",
- "ndk-context",
  "save-dweb-backend",
  "serde",
  "serde_json",
