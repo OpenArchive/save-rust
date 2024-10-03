@@ -20,7 +20,7 @@ rustup target add \
         # i686-linux-android
 
 # Build the android libraries in the jniLibs directory
-cargo ndk -o $JNI_DIR \
+clear && cargo ndk -o $JNI_DIR \
         --manifest-path ../Cargo.toml \
         -t arm64-v8a \
         build --release 
