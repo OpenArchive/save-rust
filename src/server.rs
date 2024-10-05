@@ -1,10 +1,12 @@
 #![allow(unused)]
 pub mod server {
-    use actix_web::{web, App, HttpResponse, HttpServer, Responder, Error};
+    use actix_web::{web, App, Error as ActixError, HttpResponse, HttpServer, Responder};
     use actix_web::{get, patch, post, put};
+    use anyhow::{Context, Result, anyhow};
     use base64_url;
     use eyre::Report;
-    use futures::future;
+    use futures::{future, lock};
+    use once_cell::sync::OnceCell;
     use std::env;
     use std::path::Path;
     use std::sync::Arc;
@@ -14,16 +16,49 @@ pub mod server {
     use save_dweb_backend::constants as dweb;
     use serde_json::json;
     use std::fs;
+    use thiserror::Error;
     use veilid_core::{
         vld0_generate_keypair, CryptoKey, TypedKey, VeilidUpdate, CRYPTO_KIND_VLD0, VALID_CRYPTO_KINDS
     };
     use crate::{log_debug, log_info, log_error};
     use crate::logging::android_log;
-    use crate::constants::{self, TAG};
+    use crate::constants::{self, TAG, VERSION};
+    use crate::error::{AppError, AppResult};
+    use crate::status_updater::{update_status, update_extended_status, SnowbirdServiceStatus};
 
-    struct AppState {
-        backend: Arc<TokioMutex<Backend>>,
+    #[derive(Error, Debug)]
+    pub enum BackendError {
+        #[error("Backend not initialized")]
+        NotInitialized,
+
+        #[error("Failed to initialize backend: {0}")]
+        InitializationError(#[from] std::io::Error),
     }
+
+    static BACKEND: OnceCell<Arc<TokioMutex<Backend>>> = OnceCell::new();
+
+    pub async fn get_backend<'a>() -> Result<impl std::ops::DerefMut<Target = Backend> + 'a, anyhow::Error> {
+        match BACKEND.get() {
+            Some(backend) => Ok(backend.lock().await),
+            None => Err(anyhow!("Backend not initialized"))
+        }
+    }
+
+    fn init_backend(backend_path: &Path) -> Arc<TokioMutex<Backend>> {
+        Arc::new(TokioMutex::new(
+            Backend::new(backend_path, 8080).expect("Generic reason")
+        ))
+    }
+
+    // trait IntoBackendResult<T> {
+    //     fn into_backend_result(self) -> Result<T, BackendError>;
+    // }
+    
+    // impl<T, E: std::error::Error + Send + Sync + 'static> IntoBackendResult<T> for Result<T, E> {
+    //     fn into_backend_result(self) -> Result<T, BackendError> {
+    //         self.map_err(|e| BackendError::ThirdPartyError(Box::new(e)))
+    //     }
+    // }
 
     fn create_veilid_cryptokey_from_base64(key_string: &str) -> Result<CryptoKey, Box<dyn std::error::Error>> {
         // Decode base64url string to bytes
@@ -42,19 +77,22 @@ pub mod server {
     async fn status() -> impl Responder {
         HttpResponse::Ok().json(serde_json::json!({
             "status": "running",
-            "version": env!("CARGO_PKG_VERSION")
+            "version": *VERSION
         }))
     }
 
     #[get("/api/groups")]
-    async fn get_groups(data: web::Data<AppState>) -> Result<impl Responder, Error> {
-        let backend = data.backend.lock().await;
+    async fn get_groups() -> AppResult<impl Responder> {
+        // update_status(SnowbirdServiceStatus::Processing);
 
-        let groups = backend.list_groups().await
-            .map_err(|e| {
-                eprintln!("Error listing groups: {:?}", e);
-                actix_web::error::ErrorInternalServerError("Failed to retrieve groups")
-            })?;
+        let mut backend = get_backend().await?;
+
+        let groups = backend.list_groups().await.unwrap();
+
+            // .map_err(|e| {
+            //     eprintln!("Error listing groups: {:?}", e);
+            //     actix_web::error::ErrorInternalServerError("Failed to retrieve groups")
+            // });
     
         let group_data_futures: Vec<_> = groups.iter().map(|group| async move {
             let name_result: Result<String, Report> = group.get_name().await;
@@ -69,13 +107,15 @@ pub mod server {
     
         let group_data: Vec<serde_json::Value> = future::join_all(group_data_futures).await;
     
+        // update_status(SnowbirdServiceStatus::Idle);
+
         Ok(HttpResponse::Ok().json(json!({ "groups": group_data })))
     }
 
     #[get("/api/groups/{group_id}")]
-    async fn get_group(data: web::Data<AppState>, path: web::Path<String>) -> Result<impl Responder, Error> {
-        let mut backend = data.backend.lock().await;
-    
+    async fn get_group(path: web::Path<String>) -> AppResult<impl Responder> {
+        let mut backend = get_backend().await?;
+
         let group_id = path.into_inner();
 
         let key_string = "nN7W0-JiuhIcCWhy4Sw0J7mfDWWE9OtnCfAbLmwLbq0";
@@ -90,17 +130,17 @@ pub mod server {
     }
 
     #[post("/api/groups")]
-    async fn create_group(data: web::Data<AppState>) -> Result<impl Responder, Error> {
-        let mut backend = data.backend.lock().await;
-    
-        let group = backend.create_group().await
-            .map_err(|e| {
-                eprintln!("Error creating group: {:?}", e);
-                actix_web::error::ErrorInternalServerError(format!("Failed to create group: {}", e))
-            })?;
+    async fn create_group() -> AppResult<impl Responder> {
+        log_info!(TAG, "step 10");
 
-            // Ok(HttpResponse::Ok().json(group));
-    
+        let mut backend = get_backend().await?;
+
+        log_info!(TAG, "step 20");
+
+        let group = backend.create_group().await?;
+
+        log_info!(TAG, "step 30");
+
         Ok(HttpResponse::Ok().json(json!({
             "groupId": group.id(),
             "key": group.dht_record.key()
@@ -108,9 +148,9 @@ pub mod server {
     }
 
     #[patch("/api/groups/{group_id}")]
-    async fn update_group(data: web::Data<AppState>, path: web::Path<String>) -> Result<impl Responder, Error> {
-        let mut backend = data.backend.lock().await;
-    
+    async fn update_group(path: web::Path<String>) -> AppResult<impl Responder> {
+        let mut backend = get_backend().await?;
+
         let group_id = path.into_inner();
 
         // let group = backend.get_group(con).await?;
@@ -123,8 +163,8 @@ pub mod server {
     }
 
     #[get("/api/repos")]
-    async fn get_repos(data: web::Data<AppState>) -> Result<impl Responder, Error> {
-        let mut backend = data.backend.lock().await;
+    async fn get_repos() -> AppResult<impl Responder> {
+        let mut backend = get_backend().await?;
 
         Ok(HttpResponse::Ok().json(json!({
             "name": "My Repo"
@@ -132,47 +172,51 @@ pub mod server {
     }
 
     #[post("/api/repos")]
-    async fn create_repos(data: web::Data<AppState>) -> Result<impl Responder, Error> {
-        let mut backend = data.backend.lock().await;
+    async fn create_repos() -> AppResult<impl Responder> {
+        let mut backend = get_backend().await?;
 
         let repo = backend.create_repo().await.expect("Unable to create repo");
         let repo_key = repo.get_id();
         let repo_name = "Test Repo";
 
         Ok(HttpResponse::Ok().json(json!({
-            "name": "My Repo"
+            "repoId": repo.id,
+            "key": repo.dht_record.key()
         })))
     }
 
-    pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> std::io::Result<()> {
+    pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> anyhow::Result<()> {
         log_debug!(TAG, "start_server: Using socket path: {:?}", server_socket_path);
 
+        match update_extended_status(SnowbirdServiceStatus::BackendRunning, Some("hi")) {
+            Ok(_) => {
+                log_debug!(TAG, "status updated");
+            }
+            Err(e) => {
+                log_error!(TAG, "Update error: {:?}", e);
+            }
+        }
+
         if env::var("HOME").is_err() {
-            env::set_var("HOME", "/data/user/0/net.opendasharchive.openarchive.debug/files");
+            env::set_var("HOME", backend_base_directory);
         }
         
         let backend_path = Path::new(backend_base_directory);
 
-        let backend = Arc::new(TokioMutex::new(
-            Backend::new(backend_path, 8080).expect("Unable to create Backend")
-        ));
+        BACKEND.get_or_init(|| init_backend(backend_path));
         
-        let backend_clone = Arc::clone(&backend);
+        {
+            let mut backend = get_backend().await?;
 
-        match backend_clone.lock().await.start().await {
-            Ok(_) => log_debug!(TAG, "Backend started successfully"),
-            Err(e) => log_error!(TAG, "Failed to start backend: {}", e)
+            backend.start().await.context("Backend failed to start");
         }
 
-        HttpServer::new(move || {
-            let app_state = web::Data::new(AppState {
-                backend: backend.clone(),
-            });
+        // update_status(SnowbirdServiceStatus::BackendRunning);
 
-            log_info!(TAG, "Server started");
+        let web_server = HttpServer::new(move || {
+            // update_status(SnowbirdServiceStatus::WebServerInitializing);
 
             App::new()
-            .app_data(app_state)
             .service(status)
             .service(get_group)
             .service(get_groups)
@@ -181,7 +225,23 @@ pub mod server {
             .service(get_repos)
         })
         .bind_uds(server_socket_path)?
-        .run()
-        .await
+        .run();
+
+        // update_status(SnowbirdServiceStatus::WebServerRunning);
+
+        // This one doesn't return, so we notify success before we get here.
+        //
+        web_server.await.context("Failed to start server")
+    }
+
+    pub async fn stop() -> anyhow::Result<()> {
+        let mut backend = get_backend().await?;
+
+        match backend.stop().await {
+            Ok(_) => log_debug!(TAG, "Backend shut down successfully."),
+            Err(e) => log_error!(TAG, "Failed to shut down backend: {:?}", e)
+        }
+
+        Ok(())
     }
 }

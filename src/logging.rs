@@ -25,10 +25,10 @@ pub fn android_log(level: i32, tag: &str, msg: &str) {
 }
 
 // Define log levels
-pub const LOG_LEVEL_DEBUG: i32 = 3;
-pub const LOG_LEVEL_INFO: i32 = 4;
-pub const LOG_LEVEL_WARN: i32 = 5;
-pub const LOG_LEVEL_ERROR: i32 = 6;
+#[allow(dead_code)] pub const LOG_LEVEL_DEBUG: i32 = 3;
+#[allow(dead_code)] pub const LOG_LEVEL_INFO: i32 = 4;
+#[allow(dead_code)] pub const LOG_LEVEL_WARN: i32 = 5;
+#[allow(dead_code)] pub const LOG_LEVEL_ERROR: i32 = 6;
 
 // Main logging macro
 #[macro_export]

@@ -1,5 +1,9 @@
 #[cfg(target_os = "android")]
-pub mod android_bridge;
-pub mod constants;
-pub mod logging;
-pub mod server;
+mod android_bridge;
+
+mod constants;
+mod error;
+mod jni_globals;
+mod logging;
+mod server;
+mod status_updater;
