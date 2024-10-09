@@ -8,6 +8,7 @@
     use crate::server::server::get_backend;
     use crate::utils::create_veilid_typedkey_from_base64;
     use crate::models::IntoSnowbirdGroupsWithNames;
+    use save_dweb_backend::common::DHTEntity;
 
     pub fn scope() -> actix_web::Scope {
         web::scope("/groups")
