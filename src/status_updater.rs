@@ -18,6 +18,7 @@ pub enum SnowbirdServiceStatus {
     Error = 6,
 }
 
+#[allow(dead_code)]
 pub fn update_status(status: SnowbirdServiceStatus) -> JniResult<()> {
     log_debug!(TAG, "Updating status: {:?}", status);
     update_extended_status(status, Some("hi"))?;
@@ -38,14 +39,10 @@ pub fn update_extended_status(status: SnowbirdServiceStatus, error_message: Opti
     // let env = vm.attach_current_thread()?;
 
     with_env(|mut env| {
-        log_debug!(TAG, "Got env");
-
         // Create the error string
         let error_jstring = error_message
             .map(|msg| env.new_string(msg))
             .transpose()?;
-
-        log_debug!(TAG, "Got error string");
 
         let null_obj = JObject::null();
         let error_jvalue = error_jstring
@@ -54,8 +51,6 @@ pub fn update_extended_status(status: SnowbirdServiceStatus, error_message: Opti
     
         // Find the class
         let class = env.find_class(class_name)?;
-
-        log_debug!(TAG, "Got class");
 
         env.call_static_method(
             class,

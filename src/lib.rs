@@ -1,9 +1,15 @@
-#[cfg(target_os = "android")]
-mod android_bridge;
+#![recursion_limit = "256"]
 
-mod constants;
-mod error;
-mod jni_globals;
-mod logging;
-mod server;
-mod status_updater;
+#[cfg(target_os = "android")]
+pub mod android_bridge;
+
+pub mod constants;
+pub mod error;
+pub mod jni_globals;
+pub mod logging;
+pub mod groups;
+pub mod repos;
+pub mod server;
+pub mod models;
+pub mod status_updater;
+pub mod utils;

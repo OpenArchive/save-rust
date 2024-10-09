@@ -119,14 +119,10 @@ fn setup_jni_environments(env: &mut JNIEnv, context: JObject, clazz: JClass) -> 
 
     let global_context = env.new_global_ref(context)?;
     
-    log_debug!(TAG, "step 10");
-
     update_extended_status(SnowbirdServiceStatus::BackendRunning, Some("hi"))?;
 
     // Use a new JNIEnv for jni_smoke_test
     with_env(env, |env| jni_smoke_test(env, global_context.into_jobject()))?;
-
-    log_debug!(TAG, "step 20");
 
     // Use another new JNIEnv for veilid_core_setup_android
     with_env(env, |env| {
@@ -134,8 +130,6 @@ fn setup_jni_environments(env: &mut JNIEnv, context: JObject, clazz: JClass) -> 
         Ok(())
     })?;
 
-    log_debug!(TAG, "step 30");
-    
     Ok(())
 }
 

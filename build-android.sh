@@ -13,13 +13,14 @@ mkdir -p $JNI_DIR
 
 # Set up cargo-ndk
 # cargo install cargo-ndk
+# armv7-linux-androideabi
 rustup target add \
         aarch64-linux-android \
-        armv7-linux-androideabi \
+         \
 
 # Build the android libraries in the jniLibs directory
+# armeabi-v7a
 cargo ndk -o $JNI_DIR \
         --manifest-path ../Cargo.toml \
         -t arm64-v8a \
-        -t armeabi-v7a \
         build --release 
