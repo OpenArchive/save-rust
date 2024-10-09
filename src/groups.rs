@@ -59,6 +59,9 @@
         log_debug!(TAG, "got backend group");
         log_debug!(TAG, "backend url = {}", backend_group.get_url());
 
+        // Set group name using the request
+        backend_group.set_name(&request.name).await?;
+
         let mut snowbird_group: SnowbirdGroup = (&backend_group).into();
         log_debug!(TAG, "got snowbird group");
 
