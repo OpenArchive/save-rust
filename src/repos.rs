@@ -46,18 +46,16 @@ async fn create_repo(
     let group_id = path.into_inner();
     let repo_data = body.into_inner();
 
-    let mut backend = get_backend().await?;
-
-    let typed_key = create_veilid_typedkey_from_base64(&group_id)?;
-    let mut group = backend.get_group(typed_key).await?;
-
+    let backend = get_backend().await?;
+    
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
-    let repo = backend.create_repo(&crypto_key).await?;
+    let mut group = backend.get_group(&crypto_key).await?;
+
+    let repo = group.create_repo().await?;
+
     repo.set_name(&repo_data.name).await?;
 
-    group.add_repo(repo.clone()).expect("Unable to add repo1");
-
-    let snowbird_repo: SnowbirdRepo = repo.into();
+    let snowbird_repo: SnowbirdRepo = repo.clone().into(); 
     
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
