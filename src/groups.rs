@@ -6,7 +6,7 @@
     use crate::log_debug;
     use crate::constants::TAG;
     use crate::server::server::get_backend;
-    use crate::utils::create_veilid_typedkey_from_base64;
+    use crate::utils::create_veilid_cryptokey_from_base64;
     use crate::models::IntoSnowbirdGroupsWithNames;
     use save_dweb_backend::common::DHTEntity;
 
@@ -33,7 +33,7 @@
 
         let group_id = group_id.into_inner();
         // let key_string = "nN7W0-JiuhIcCWhy4Sw0J7mfDWWE9OtnCfAbLmwLbq0";
-        let key = create_veilid_typedkey_from_base64(group_id.as_str()).unwrap();
+        let key = create_veilid_cryptokey_from_base64(group_id.as_str()).unwrap();
         log_debug!(TAG, "got key {}", key);
 
         let backend_group = backend.get_group(key).await?;
