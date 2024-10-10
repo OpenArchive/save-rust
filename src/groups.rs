@@ -28,7 +28,7 @@
 
     #[get("/{group_id}")]
     async fn get_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
-        let mut backend = get_backend().await?;
+        let backend = get_backend().await?;
         log_debug!(TAG, "got backend");
 
         let group_id = group_id.into_inner();
@@ -53,7 +53,7 @@
 
         log_debug!(TAG, "got body {:?}", request);
 
-        let mut backend = get_backend().await?;
+        let backend = get_backend().await?;
         log_debug!(TAG, "got backend");
 
         let backend_group = backend.create_group().await?;
