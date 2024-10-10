@@ -3,9 +3,7 @@ use serde::Deserialize;
 use crate::error::AppResult;
 use crate::models::SnowbirdRepo;
 use crate::server::server::{get_backend, GroupRepoPath};
-use crate::utils::{
-    create_veilid_cryptokey_from_base64, create_veilid_typedkey_from_base64
-};
+use crate::utils::create_veilid_cryptokey_from_base64;
 use save_dweb_backend::common::DHTEntity;
 
 pub fn scope() -> Scope {
@@ -25,10 +23,9 @@ async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     let _group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
 
-    let crypto_key = create_veilid_typedkey_from_base64(&repo_id)?;
-    let mut backend = get_backend().await?;
-    let backend_repo = backend.get_repo(crypto_key).await?;
-    let snowbird_repo: SnowbirdRepo = (*backend_repo).into();
+    // Fetch the backend and the group
+    let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
+    let backend = get_backend().await?;
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
 
