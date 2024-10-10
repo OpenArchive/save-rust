@@ -170,3 +170,33 @@ async fn list_files(
     Ok(HttpResponse::Ok().json(files_with_status))
 }
 
+#[post("/{repo_id}/download/{file_name}")]
+async fn download_file(
+    path: web::Path<(GroupRepoPath, String)>,
+) -> AppResult<impl Responder> {
+    let (path_params, file_name) = path.into_inner();
+    let group_id = &path_params.group_id;
+    let repo_id = &path_params.repo_id;
+
+    // Fetch the backend and group
+    let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
+    let backend = get_backend().await?;
+    let group = backend.get_group(&crypto_key).await?;
+
+    // Fetch the repo
+    let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
+    let repo = group.get_repo(&repo_crypto_key)?;
+
+    // Get the file hash
+    let file_hash = repo.get_file_hash(&file_name).await?;
+
+    // Trigger file download from peers using the hash
+    group.download_hash_from_peers(&file_hash).await.map_err(|e| {
+        anyhow::anyhow!("Failed to download file from peers: {}", e)
+    })?;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "message": format!("File {} has been successfully downloaded from peers", file_name)
+    })))
+}
+
