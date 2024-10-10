@@ -6,8 +6,9 @@
     use crate::log_debug;
     use crate::constants::TAG;
     use crate::server::server::get_backend;
-    use crate::utils::create_veilid_typedkey_from_base64;
+    use crate::utils::create_veilid_cryptokey_from_base64;
     use crate::models::IntoSnowbirdGroupsWithNames;
+    use save_dweb_backend::common::DHTEntity;
 
     pub fn scope() -> actix_web::Scope {
         web::scope("/groups")
@@ -27,15 +28,15 @@
 
     #[get("/{group_id}")]
     async fn get_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
-        let mut backend = get_backend().await?;
+        let backend = get_backend().await?;
         log_debug!(TAG, "got backend");
 
         let group_id = group_id.into_inner();
         // let key_string = "nN7W0-JiuhIcCWhy4Sw0J7mfDWWE9OtnCfAbLmwLbq0";
-        let key = create_veilid_typedkey_from_base64(group_id.as_str()).unwrap();
+        let key = create_veilid_cryptokey_from_base64(group_id.as_str()).unwrap();
         log_debug!(TAG, "got key {}", key);
 
-        let backend_group = backend.get_group(key).await?;
+        let backend_group = backend.get_group(&key).await?;
         log_debug!(TAG, "got backend group");
 
         let mut snowbird_group: SnowbirdGroup = backend_group.as_ref().into();
@@ -52,12 +53,15 @@
 
         log_debug!(TAG, "got body {:?}", request);
 
-        let mut backend = get_backend().await?;
+        let backend = get_backend().await?;
         log_debug!(TAG, "got backend");
 
         let backend_group = backend.create_group().await?;
         log_debug!(TAG, "got backend group");
         log_debug!(TAG, "backend url = {}", backend_group.get_url());
+
+        // Set group name using the request
+        backend_group.set_name(&request.name).await?;
 
         let mut snowbird_group: SnowbirdGroup = (&backend_group).into();
         log_debug!(TAG, "got snowbird group");
