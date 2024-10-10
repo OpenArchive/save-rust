@@ -132,3 +132,41 @@ async fn upload_file(
     })))
 }
 
+
+#[get("/{repo_id}/list_files")]
+async fn list_files(
+    path: web::Path<GroupRepoPath>,
+) -> AppResult<impl Responder> {
+    let path_params = path.into_inner();
+    let group_id = &path_params.group_id;
+    let repo_id = &path_params.repo_id;
+
+    // Fetch the backend and group
+    let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
+    let backend = get_backend().await?;
+    let group = backend.get_group(&crypto_key).await?;
+
+    // Fetch the repo
+    let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
+    let repo = group.get_repo(&repo_crypto_key)?;
+
+    // List files and check if they are downloaded
+    let files = repo.list_files().await?;
+    let mut files_with_status = Vec::new();
+
+    for file_name in files {
+        let file_hash = match repo.get_file_hash(&file_name).await {
+            Ok(hash) => hash,
+            Err(_) => continue, // Handle the error or skip the file if there's an issue
+        };
+        let is_downloaded = repo.has_hash(&file_hash).await.unwrap_or(false); // Check if the file is downloaded
+        files_with_status.push(json!({
+            "name": file_name,
+            "hash": file_hash,
+            "is_downloaded": is_downloaded
+        }));
+    }
+
+    Ok(HttpResponse::Ok().json(files_with_status))
+}
+
