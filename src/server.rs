@@ -56,7 +56,7 @@ pub mod server {
 
     fn init_backend(backend_path: &Path) -> Arc<TokioMutex<Backend>> {
         Arc::new(TokioMutex::new(
-            Backend::new(backend_path, 8080)
+            Backend::new(backend_path)
                 .expect("Failed to create Backend.")
         ))
     }
