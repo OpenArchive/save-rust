@@ -81,3 +81,54 @@ async fn create_repo(
     
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
+
+#[derive(Deserialize)]
+struct UploadFileRequest {
+    file_name: String,
+    file_content: Vec<u8>,
+}
+
+#[post("/{repo_id}/upload")]
+async fn upload_file(
+    path: web::Path<GroupRepoPath>,
+    body: web::Json<UploadFileRequest>,
+) -> AppResult<impl Responder> {
+    let path_params = path.into_inner();
+    let group_id = &path_params.group_id;
+    let repo_id = &path_params.repo_id;
+
+    // Fetch the backend and group with proper error handling
+    let crypto_key = create_veilid_cryptokey_from_base64(&group_id)
+        .map_err(|e| anyhow::anyhow!("Invalid group id: {}", e))?;
+    let backend = get_backend().await.map_err(|e| anyhow::anyhow!("Failed to get backend: {}", e))?;
+    let group = backend.get_group(&crypto_key).await.map_err(|e| anyhow::anyhow!("Failed to get group: {}", e))?;
+
+    // Fetch the repo with proper error handling
+    let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)
+        .map_err(|e| anyhow::anyhow!("Invalid repo id: {}", e))?;
+    let repo = group.get_repo(&repo_crypto_key).map_err(|e| anyhow::anyhow!("Repo not found: {}", e))?;
+
+    // Validate file content
+    if body.file_content.is_empty() {
+        return Err(anyhow::anyhow!("File content is empty").into()); 
+    }
+
+    log::info!("Uploading file: {}", &body.file_name);
+
+    // Upload the file
+    let file_hash = repo.upload(&body.file_name, body.file_content.clone()).await
+        .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
+
+    log::info!("Updating DHT with hash: {}", file_hash);
+
+    // After uploading, update the DHT with the new file’s hash
+    let updated_collection_hash = repo
+        .set_file_and_update_dht(&repo.get_name().await?, &body.file_name, &file_hash)
+        .await.map_err(|e| anyhow::anyhow!("Failed to update DHT: {}", e))?;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "file_hash": file_hash,
+        "updated_collection_hash": updated_collection_hash,
+    })))
+}
+
