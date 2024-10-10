@@ -36,7 +36,7 @@
         let key = create_veilid_cryptokey_from_base64(group_id.as_str()).unwrap();
         log_debug!(TAG, "got key {}", key);
 
-        let backend_group = backend.get_group(key).await?;
+        let backend_group = backend.get_group(&key).await?;
         log_debug!(TAG, "got backend group");
 
         let mut snowbird_group: SnowbirdGroup = backend_group.as_ref().into();
