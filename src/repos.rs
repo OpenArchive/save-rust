@@ -20,12 +20,20 @@ struct CreateRepoRequest {
 #[get("/{repo_id}")]
 async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
-    let _group_id = &path_params.group_id;
+    let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
 
     // Fetch the backend and the group
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
     let backend = get_backend().await?;
+    let group = backend.get_group(&crypto_key).await?;
+
+    // Fetch the repo from the group
+    let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
+    let repo = group.get_repo(&repo_crypto_key);
+    
+    // Convert the repo into the desired format and return the response
+    let snowbird_repo: SnowbirdRepo = repo?.clone().into();
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
 
