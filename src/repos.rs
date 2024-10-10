@@ -33,7 +33,19 @@ async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     let repo = group.get_repo(&repo_crypto_key);
     
     // Convert the repo into the desired format and return the response
-    let snowbird_repo: SnowbirdRepo = repo?.clone().into();
+    
+    // First, handle the Result to get &Box<Repo>
+    let repo_box_ref = repo?;
+
+    // Then, dereference to get &Repo
+    let repo_ref = &**repo_box_ref;
+
+    // If Repo implements Clone, clone it to get an owned Repo
+    let repo_owned = repo_ref.clone();
+
+    // Now, convert the owned Repo into SnowbirdRepo
+    let snowbird_repo: SnowbirdRepo = repo_owned.into();
+
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
 
@@ -55,7 +67,17 @@ async fn create_repo(
 
     repo.set_name(&repo_data.name).await?;
 
-    let snowbird_repo: SnowbirdRepo = repo.clone().into(); 
+    // First, handle the Result to get &Box<Repo>
+    let repo_box_ref = repo;
+
+    // Then, dereference to get &Repo
+    let repo_ref = &**repo_box_ref;
+
+    // If Repo implements Clone, clone it to get an owned Repo
+    let repo_owned = repo_ref.clone();
+
+    // Now, convert the owned Repo into SnowbirdRepo
+    let snowbird_repo: SnowbirdRepo = repo_owned.into();
     
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
