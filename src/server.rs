@@ -1,7 +1,7 @@
 #![allow(unused)]
 pub mod server {
     use actix_web::{web, App, Error as ActixError, HttpResponse, HttpServer, Responder};
-    use actix_web::{get, patch, post, put};
+    use actix_web::{get, patch, post, put, delete};
     use anyhow::{Context, Result, anyhow};
     use base64_url;
     use futures::{future, lock};
