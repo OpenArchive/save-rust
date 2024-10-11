@@ -5185,7 +5185,7 @@ dependencies = [
 [[package]]
 name = "save-dweb-backend"
 version = "0.1.0"
-source = "git+https://github.com/OpenArchive/save-dweb-backend#f4b59ea9abd3cdb24c3263f489159e4dc2156525"
+source = "git+https://github.com/OpenArchive/save-dweb-backend#7ea85a6a0c9b459d2bffad2102266a90369dbb65"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -6611,7 +6611,7 @@ dependencies = [
 [[package]]
 name = "veilid-core"
 version = "0.3.4"
-source = "git+https://gitlab.com/veilid/veilid.git?branch=main#9bb4863b299e0998963bf860c47adbe445968a8a"
+source = "git+https://gitlab.com/veilid/veilid.git?branch=main#14cd561e09276fd17077c7c7e2b8ca287d42484b"
 dependencies = [
  "argon2",
  "async-io",
@@ -6730,7 +6730,7 @@ dependencies = [
 [[package]]
 name = "veilid-iroh-blobs"
 version = "0.1.0"
-source = "git+https://github.com/RangerMauve/veilid-iroh-blobs.git?branch=default#b01958eeb5d0ce213fcddc1eccbc38a696e81062"
+source = "git+https://github.com/RangerMauve/veilid-iroh-blobs.git?branch=default#f96a02a04e8dccccbf8d2db200f26bf714e3f2bc"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -6751,7 +6751,7 @@ dependencies = [
 [[package]]
 name = "veilid-tools"
 version = "0.3.4"
-source = "git+https://gitlab.com/veilid/veilid.git?branch=main#9bb4863b299e0998963bf860c47adbe445968a8a"
+source = "git+https://gitlab.com/veilid/veilid.git?branch=main#14cd561e09276fd17077c7c7e2b8ca287d42484b"
 dependencies = [
  "android_logger 0.13.3",
  "async-lock 3.4.0",
