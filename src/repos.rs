@@ -123,7 +123,7 @@ async fn upload_file(
 
     // Validate file content
     if file_data.is_empty() {
-        return Err(anyhow::anyhow!("File content is empty").into()); 
+        return Err(anyhow::anyhow!("File content is empty").into());
     }
 
     log::info!("Uploading file: {}", file_name);
@@ -183,7 +183,7 @@ async fn list_files(
     Ok(HttpResponse::Ok().json(files_with_status))
 }
 
-#[post("/{repo_id}/download/{file_name}")]
+#[get("/{repo_id}/download/{file_name}")]
 async fn download_file(
     path: web::Path<(GroupRepoPath, String)>,
 ) -> AppResult<impl Responder> {
@@ -204,14 +204,16 @@ async fn download_file(
     let file_hash = repo.get_file_hash(&file_name).await?;
 
     // Trigger file download from peers using the hash
-    group.download_hash_from_peers(&file_hash).await.map_err(|e| {
+    let file_data = group.download_hash_from_peers(&file_hash).await.map_err(|e| {
         anyhow::anyhow!("Failed to download file from peers: {}", e)
     })?;
 
-    Ok(HttpResponse::Ok().json(json!({
-        "message": format!("File {} has been successfully downloaded from peers", file_name)
-    })))
+    // Return the file data as a binary response
+    Ok(HttpResponse::Ok()
+        .content_type("application/octet-stream")
+        .body(file_data))
 }
+
 
 
 #[delete("/{repo_id}/delete_file/{file_name}")]
