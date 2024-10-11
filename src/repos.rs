@@ -19,6 +19,11 @@ struct CreateRepoRequest {
     name: String
 }
 
+#[derive(Deserialize)]
+struct MediaQuery {
+    file_name: String,
+}
+
 #[get("/{repo_id}")]
 async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
