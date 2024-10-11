@@ -41,9 +41,7 @@ async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     // Fetch the repo from the group
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
     let repo = group.get_repo(&repo_crypto_key);
-
-    // Convert the repo into the desired format and return the response
-
+    
     // First, handle the Result to get &Box<Repo>
     let repo_box_ref = repo?;
 
@@ -84,8 +82,8 @@ async fn create_repo(
 
     // If Repo implements Clone, clone it to get an owned Repo
     let repo_owned = repo_ref.clone();
-
-    // Now, convert the owned Repo into SnowbirdRepo
+    
+   // Now, convert the owned Repo into SnowbirdRepo
     let snowbird_repo: SnowbirdRepo = repo_owned.into();
 
     Ok(HttpResponse::Ok().json(snowbird_repo))
