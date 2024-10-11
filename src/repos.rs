@@ -241,8 +241,8 @@ async fn download_file(
     // Get the file hash
     let file_hash = repo.get_file_hash(file_name).await?;
 
-    if !group.has_hash(&hash_file).await? {
-        group.download_hash_from_peers(&hash_file).await?;
+    if !group.has_hash(&file_hash).await? {
+        group.download_hash_from_peers(&file_hash).await?;
     }
 
     // Trigger file download from peers using the hash
