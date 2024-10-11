@@ -89,14 +89,16 @@ async fn create_repo(
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
 
-#[post("/{repo_id}/media/{file_name}")]
+#[post("/{repo_id}/media")]
 async fn upload_file(
-    path: web::Path<(GroupRepoPath, String)>,
+    path: web::Path<GroupRepoPath>,
+    query: web::Query<MediaQuery>,  
     mut body: web::Payload,
 ) -> AppResult<impl Responder> {
-    let (path_params, file_name) = path.into_inner();
+    let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
+    let file_name = &query.file_name;  
 
     // Fetch the backend and group with proper error handling
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)
@@ -125,14 +127,14 @@ async fn upload_file(
     log::info!("Uploading file: {}", file_name);
 
     // Upload the file
-    let file_hash = repo.upload(&file_name, file_data).await
+    let file_hash = repo.upload(file_name, file_data).await
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
 
     log::info!("Updating DHT with hash: {}", file_hash);
 
     // After uploading, update the DHT with the new file’s hash
     let updated_collection_hash = repo
-        .set_file_and_update_dht(&repo.get_name().await?, &file_name, &file_hash)
+        .set_file_and_update_dht(&repo.get_name().await?, file_name, &file_hash)
         .await.map_err(|e| anyhow::anyhow!("Failed to update DHT: {}", e))?;
 
     Ok(HttpResponse::Ok().json(json!({
@@ -179,13 +181,15 @@ async fn list_files(
     Ok(HttpResponse::Ok().json(files_with_status))
 }
 
-#[get("/{repo_id}/media/{file_name}")]
+#[get("/{repo_id}/media")]
 async fn download_file(
-    path: web::Path<(GroupRepoPath, String)>,
+    path: web::Path<GroupRepoPath>,
+    query: web::Query<MediaQuery>,  
 ) -> AppResult<impl Responder> {
-    let (path_params, file_name) = path.into_inner();
+    let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
+    let file_name = &query.file_name; 
 
     // Fetch the backend and group
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
@@ -197,7 +201,7 @@ async fn download_file(
     let repo = group.get_repo(&repo_crypto_key)?;
 
     // Get the file hash
-    let file_hash = repo.get_file_hash(&file_name).await?;
+    let file_hash = repo.get_file_hash(file_name).await?;
 
     // Trigger file download from peers using the hash
     let file_data = group.download_hash_from_peers(&file_hash).await.map_err(|e| {
