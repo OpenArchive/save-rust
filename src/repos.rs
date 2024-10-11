@@ -89,7 +89,7 @@ struct UploadQuery {
     file_name: String,
 }
 
-#[post("/{repo_id}/upload")]
+#[post("/{repo_id}/media")]
 async fn upload_file(
     path: web::Path<GroupRepoPath>,
     query: web::Query<UploadQuery>,
@@ -183,7 +183,7 @@ async fn list_files(
     Ok(HttpResponse::Ok().json(files_with_status))
 }
 
-#[get("/{repo_id}/download/{file_name}")]
+#[get("/{repo_id}/media/{file_name}")]
 async fn download_file(
     path: web::Path<(GroupRepoPath, String)>,
 ) -> AppResult<impl Responder> {
