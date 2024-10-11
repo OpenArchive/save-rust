@@ -1,6 +1,7 @@
 use actix_web::{web, get, post, delete, HttpResponse, Responder, Scope};
 use serde::Deserialize;
 use serde_json::json;
+use futures::StreamExt;
 use crate::error::AppResult;
 use crate::models::SnowbirdRepo;
 use crate::server::server::{get_backend, GroupRepoPath};
@@ -84,15 +85,15 @@ async fn create_repo(
 }
 
 #[derive(Deserialize)]
-struct UploadFileRequest {
+struct UploadQuery {
     file_name: String,
-    file_content: Vec<u8>,
 }
 
 #[post("/{repo_id}/upload")]
 async fn upload_file(
     path: web::Path<GroupRepoPath>,
-    body: web::Json<UploadFileRequest>,
+    query: web::Query<UploadQuery>,
+    mut body: web::Payload,
 ) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
@@ -109,22 +110,33 @@ async fn upload_file(
         .map_err(|e| anyhow::anyhow!("Invalid repo id: {}", e))?;
     let repo = group.get_repo(&repo_crypto_key).map_err(|e| anyhow::anyhow!("Repo not found: {}", e))?;
 
+    // Use the extracted file name
+    let file_name = &query.file_name;
+    log::info!("Uploading file: {}", file_name);
+
+    // Stream the file content from the body
+    let mut file_data: Vec<u8> = Vec::new();
+    while let Some(chunk) = body.next().await {
+        let chunk = chunk.map_err(|e| anyhow::anyhow!("Failed to read file chunk: {}", e))?;
+        file_data.extend_from_slice(&chunk);
+    }
+
     // Validate file content
-    if body.file_content.is_empty() {
+    if file_data.is_empty() {
         return Err(anyhow::anyhow!("File content is empty").into()); 
     }
 
-    log::info!("Uploading file: {}", &body.file_name);
+    log::info!("Uploading file: {}", file_name);
 
     // Upload the file
-    let file_hash = repo.upload(&body.file_name, body.file_content.clone()).await
+    let file_hash = repo.upload(file_name, file_data).await
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
 
     log::info!("Updating DHT with hash: {}", file_hash);
 
     // After uploading, update the DHT with the new file’s hash
     let updated_collection_hash = repo
-        .set_file_and_update_dht(&repo.get_name().await?, &body.file_name, &file_hash)
+        .set_file_and_update_dht(&repo.get_name().await?, file_name, &file_hash)
         .await.map_err(|e| anyhow::anyhow!("Failed to update DHT: {}", e))?;
 
     Ok(HttpResponse::Ok().json(json!({
