@@ -216,13 +216,15 @@ async fn download_file(
 
 
 
-#[delete("/{repo_id}/delete_file/{file_name}")]
+#[delete("/{repo_id}/media")]
 async fn delete_file(
-    path: web::Path<(GroupRepoPath, String)>,
+    path: web::Path<GroupRepoPath>,
+    query: web::Query<MediaQuery>,
 ) -> AppResult<impl Responder> {
-    let (path_params, file_name) = path.into_inner();
+    let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
+    let file_name = &query.file_name;
 
     // Fetch the backend and group
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
@@ -234,7 +236,7 @@ async fn delete_file(
     let repo = group.get_repo(&repo_crypto_key)?;
 
     // Delete the file and update the collection
-    let collection_hash = repo.delete_file(&file_name).await?;
+    let collection_hash = repo.delete_file(file_name).await?;
     
     Ok(HttpResponse::Ok().json(collection_hash))
 }
