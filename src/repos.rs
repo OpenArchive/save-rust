@@ -13,6 +13,10 @@ pub fn scope() -> Scope {
         .service(create_repo)
         .service(get_repo)
         .service(list_repos) 
+        .service(upload_file) 
+        .service(list_files) 
+        .service(download_file)
+        .service(delete_file)
 }
 
 #[derive(Deserialize)]
