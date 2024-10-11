@@ -84,18 +84,12 @@ async fn create_repo(
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
 
-#[derive(Deserialize)]
-struct UploadQuery {
-    file_name: String,
-}
-
-#[post("/{repo_id}/media")]
+#[post("/{repo_id}/media/{file_name}")]
 async fn upload_file(
-    path: web::Path<GroupRepoPath>,
-    query: web::Query<UploadQuery>,
+    path: web::Path<(GroupRepoPath, String)>,
     mut body: web::Payload,
 ) -> AppResult<impl Responder> {
-    let path_params = path.into_inner();
+    let (path_params, file_name) = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
 
@@ -110,11 +104,8 @@ async fn upload_file(
         .map_err(|e| anyhow::anyhow!("Invalid repo id: {}", e))?;
     let repo = group.get_repo(&repo_crypto_key).map_err(|e| anyhow::anyhow!("Repo not found: {}", e))?;
 
-    // Use the extracted file name
-    let file_name = &query.file_name;
+    // Log file_name and stream file content
     log::info!("Uploading file: {}", file_name);
-
-    // Stream the file content from the body
     let mut file_data: Vec<u8> = Vec::new();
     while let Some(chunk) = body.next().await {
         let chunk = chunk.map_err(|e| anyhow::anyhow!("Failed to read file chunk: {}", e))?;
@@ -129,14 +120,14 @@ async fn upload_file(
     log::info!("Uploading file: {}", file_name);
 
     // Upload the file
-    let file_hash = repo.upload(file_name, file_data).await
+    let file_hash = repo.upload(&file_name, file_data).await
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
 
     log::info!("Updating DHT with hash: {}", file_hash);
 
     // After uploading, update the DHT with the new file’s hash
     let updated_collection_hash = repo
-        .set_file_and_update_dht(&repo.get_name().await?, file_name, &file_hash)
+        .set_file_and_update_dht(&repo.get_name().await?, &file_name, &file_hash)
         .await.map_err(|e| anyhow::anyhow!("Failed to update DHT: {}", e))?;
 
     Ok(HttpResponse::Ok().json(json!({
