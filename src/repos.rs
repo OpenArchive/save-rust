@@ -15,6 +15,11 @@ pub fn scope() -> Scope {
     web::scope("/groups/{group_id}/repos")
         .service(create_repo)
         .service(get_repo)
+        .service(list_repos) 
+        .service(upload_file) 
+        .service(list_files) 
+        .service(download_file)
+        .service(delete_file)
 }
 
 #[derive(Deserialize)]
@@ -55,6 +60,22 @@ async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     let snowbird_repo: SnowbirdRepo = repo_owned.into();
 
     Ok(HttpResponse::Ok().json(snowbird_repo))
+}
+
+#[get("")]
+async fn list_repos(path: web::Path<String>) -> AppResult<impl Responder> {
+    let group_id = path.into_inner();
+
+    // Fetch the backend and the group
+    let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
+    let backend = get_backend().await?;
+    let group = backend.get_group(&crypto_key).await?;
+
+    // Call the list_repos method to get the list of repo IDs
+    let repo_ids = group.list_repos();
+
+    // Return the list of repos as JSON
+    Ok(HttpResponse::Ok().json(repo_ids))
 }
 
 #[post("")]
