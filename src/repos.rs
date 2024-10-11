@@ -12,6 +12,7 @@ pub fn scope() -> Scope {
     web::scope("/groups/{group_id}/repos")
         .service(create_repo)
         .service(get_repo)
+        .service(list_repos) 
 }
 
 #[derive(Deserialize)]
