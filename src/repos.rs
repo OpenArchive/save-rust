@@ -1,12 +1,15 @@
-use actix_web::{web, get, post, delete, HttpResponse, Responder, Scope};
-use serde::Deserialize;
-use serde_json::json;
-use futures::StreamExt;
+use core::hash;
+
 use crate::error::AppResult;
 use crate::models::SnowbirdRepo;
 use crate::server::server::{get_backend, GroupRepoPath};
 use crate::utils::create_veilid_cryptokey_from_base64;
+use actix_web::{delete, get, post, web, HttpResponse, Responder, Scope};
+use futures::StreamExt;
 use save_dweb_backend::common::DHTEntity;
+use save_dweb_backend::group;
+use serde::Deserialize;
+use serde_json::json;
 
 pub fn scope() -> Scope {
     web::scope("/groups/{group_id}/repos")
@@ -16,7 +19,7 @@ pub fn scope() -> Scope {
 
 #[derive(Deserialize)]
 struct CreateRepoRequest {
-    name: String
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -38,9 +41,9 @@ async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     // Fetch the repo from the group
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
     let repo = group.get_repo(&repo_crypto_key);
-    
+
     // Convert the repo into the desired format and return the response
-    
+
     // First, handle the Result to get &Box<Repo>
     let repo_box_ref = repo?;
 
@@ -59,14 +62,13 @@ async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
 #[post("")]
 async fn create_repo(
     path: web::Path<String>,
-    body: web::Json<CreateRepoRequest>
+    body: web::Json<CreateRepoRequest>,
 ) -> AppResult<impl Responder> {
-
     let group_id = path.into_inner();
     let repo_data = body.into_inner();
 
     let backend = get_backend().await?;
-    
+
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
     let mut group = backend.get_group(&crypto_key).await?;
 
@@ -85,31 +87,38 @@ async fn create_repo(
 
     // Now, convert the owned Repo into SnowbirdRepo
     let snowbird_repo: SnowbirdRepo = repo_owned.into();
-    
+
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
 
 #[post("/{repo_id}/media")]
 async fn upload_file(
     path: web::Path<GroupRepoPath>,
-    query: web::Query<MediaQuery>,  
+    query: web::Query<MediaQuery>,
     mut body: web::Payload,
 ) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
-    let file_name = &query.file_name;  
+    let file_name = &query.file_name;
 
     // Fetch the backend and group with proper error handling
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)
         .map_err(|e| anyhow::anyhow!("Invalid group id: {}", e))?;
-    let backend = get_backend().await.map_err(|e| anyhow::anyhow!("Failed to get backend: {}", e))?;
-    let group = backend.get_group(&crypto_key).await.map_err(|e| anyhow::anyhow!("Failed to get group: {}", e))?;
+    let backend = get_backend()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to get backend: {}", e))?;
+    let group = backend
+        .get_group(&crypto_key)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to get group: {}", e))?;
 
     // Fetch the repo with proper error handling
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)
         .map_err(|e| anyhow::anyhow!("Invalid repo id: {}", e))?;
-    let repo = group.get_repo(&repo_crypto_key).map_err(|e| anyhow::anyhow!("Repo not found: {}", e))?;
+    let repo = group
+        .get_repo(&repo_crypto_key)
+        .map_err(|e| anyhow::anyhow!("Repo not found: {}", e))?;
 
     // Log file_name and stream file content
     log::info!("Uploading file: {}", file_name);
@@ -127,7 +136,9 @@ async fn upload_file(
     log::info!("Uploading file: {}", file_name);
 
     // Upload the file
-    let file_hash = repo.upload(file_name, file_data).await
+    let file_hash = repo
+        .upload(file_name, file_data)
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
 
     log::info!("Updating DHT with hash: {}", file_hash);
@@ -135,7 +146,8 @@ async fn upload_file(
     // After uploading, update the DHT with the new file’s hash
     let updated_collection_hash = repo
         .set_file_and_update_dht(&repo.get_name().await?, file_name, &file_hash)
-        .await.map_err(|e| anyhow::anyhow!("Failed to update DHT: {}", e))?;
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to update DHT: {}", e))?;
 
     Ok(HttpResponse::Ok().json(json!({
         "file_hash": file_hash,
@@ -143,11 +155,8 @@ async fn upload_file(
     })))
 }
 
-
 #[get("/{repo_id}/list_files")]
-async fn list_files(
-    path: web::Path<GroupRepoPath>,
-) -> AppResult<impl Responder> {
+async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
@@ -160,6 +169,11 @@ async fn list_files(
     // Fetch the repo
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
     let repo = group.get_repo(&repo_crypto_key)?;
+
+    let hash = repo.get_hash_from_dht().await?;
+    if !group.has_hash(&hash).await? {
+        group.download_hash_from_peers(&hash).await?;
+    }
 
     // List files and check if they are downloaded
     let files = repo.list_files().await?;
@@ -184,12 +198,12 @@ async fn list_files(
 #[get("/{repo_id}/media")]
 async fn download_file(
     path: web::Path<GroupRepoPath>,
-    query: web::Query<MediaQuery>,  
+    query: web::Query<MediaQuery>,
 ) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
-    let file_name = &query.file_name; 
+    let file_name = &query.file_name;
 
     // Fetch the backend and group
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
@@ -200,21 +214,29 @@ async fn download_file(
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
     let repo = group.get_repo(&repo_crypto_key)?;
 
+    let collection_hash = repo.get_hash_from_dht().await?;
+    if !group.has_hash(&collection_hash).await? {
+        group.download_hash_from_peers(&collection_hash).await?;
+    }
+
     // Get the file hash
     let file_hash = repo.get_file_hash(file_name).await?;
 
+    if !group.has_hash(&hash).await? {
+        group.download_hash_from_peers(&hash).await?;
+    }
+
     // Trigger file download from peers using the hash
-    let file_data = group.download_hash_from_peers(&file_hash).await.map_err(|e| {
-        anyhow::anyhow!("Failed to download file from peers: {}", e)
-    })?;
+    let file_data = group
+        .download_hash_from_peers(&file_hash)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to download file from peers: {}", e))?;
 
     // Return the file data as a binary response
     Ok(HttpResponse::Ok()
         .content_type("application/octet-stream")
         .body(file_data))
 }
-
-
 
 #[delete("/{repo_id}/media")]
 async fn delete_file(
@@ -237,6 +259,6 @@ async fn delete_file(
 
     // Delete the file and update the collection
     let collection_hash = repo.delete_file(file_name).await?;
-    
+
     Ok(HttpResponse::Ok().json(collection_hash))
 }
