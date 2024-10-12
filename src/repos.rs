@@ -73,8 +73,8 @@ async fn list_repos(path: web::Path<String>) -> AppResult<impl Responder> {
     // Call the list_repos method to get the list of repo IDs
     let repo_ids = group.list_repos();
 
-    // Return the list of repos as JSON
-    Ok(HttpResponse::Ok().json(repo_ids))
+    // Return the list of repo_ids in a JSON object
+    Ok(HttpResponse::Ok().json(json!({ "repos": repo_ids })))
 }
 
 #[post("")]
