@@ -5,6 +5,17 @@ use serde::{Deserialize, Serialize};
 use save_dweb_backend::group::Group;
 use save_dweb_backend::repo::Repo;
 
+#[derive(Deserialize)]
+pub struct GroupPath {
+    pub group_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct GroupRepoPath {
+    pub group_id: String,
+    pub repo_id: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RequestName {
     pub name: String,
@@ -17,11 +28,12 @@ impl fmt::Display for RequestName {
 }
 
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SnowbirdGroup {
     pub key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    pub uri: String
 }
 
 impl From<&Group> for SnowbirdGroup {
@@ -29,6 +41,7 @@ impl From<&Group> for SnowbirdGroup {
         SnowbirdGroup {
             key: group.id().to_string(),
             name: None,
+            uri: group.get_url()
         }
     }
 }
@@ -73,35 +86,59 @@ impl IntoSnowbirdGroupsWithNames for Vec<Box<Group>> {
     }
 }
 
-// impl From<Group> for SnowbirdGroup {
-//     fn from(group: Group) -> Self {
-//         Self::from_backend_group(&group)
-//     }
-// }
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SnowbirdRepo {
     pub id: String,
+    pub name: String
 }
 
-impl SnowbirdRepo {
-    pub fn from_dweb_repo(repo: &Repo) -> Self {
+#[async_trait::async_trait]
+pub trait AsyncFrom<T> {
+    async fn async_from(value: T) -> Self;
+}
+
+#[async_trait::async_trait]
+impl AsyncFrom<Repo> for SnowbirdRepo {
+    async fn async_from(repo: Repo) -> Self {
         SnowbirdRepo {
             id: repo.id().to_string(),
+            name: repo.get_name().await.unwrap_or_else(|_| "Unknown".to_string()),
+        }
+    }
+}
+
+impl From<&Repo> for SnowbirdRepo {
+    fn from(repo: &Repo) -> Self {
+        SnowbirdRepo {
+            id: repo.id().to_string(),
+            name: "".to_string()
         }
     }
 }
 
 impl From<Repo> for SnowbirdRepo {
     fn from(repo: Repo) -> Self {
-        Self::from_dweb_repo(&repo)
+        SnowbirdRepo {
+            id: repo.id().to_string(),
+            name: "".to_string()
+        }
     }
 }
 
-// impl FromIterator<ThirdPartyRepo> for Vec<SnowbirdRepo> {
-//     fn from_iter<I: IntoIterator<Item = ThirdPartyRepo>>(iter: I) -> Self {
-//         iter.into_iter()
-//             .map(|repo| SnowbirdRepo::from_third_party(&repo))
-//             .collect()
-//     }
-// }
+impl From<Box<Repo>> for SnowbirdRepo {
+    fn from(boxed_repo: Box<Repo>) -> Self {
+        Self::from(*boxed_repo)
+    }
+}
+
+pub trait IntoSnowbirdRepos {
+    fn into_snowbird_repos(self) -> Vec<SnowbirdRepo>;
+}
+
+impl IntoSnowbirdRepos for Vec<Repo> {
+    fn into_snowbird_repos(self) -> Vec<SnowbirdRepo> {
+        self.iter()
+            .map(SnowbirdRepo::from)
+            .collect()
+    }
+}

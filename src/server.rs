@@ -6,7 +6,7 @@ pub mod server {
     use base64_url;
     use futures::{future, lock};
     use once_cell::sync::OnceCell;
-    use std::env;
+    use std::{env, panic};
     use std::path::Path;
     use std::sync::Arc;
     use tokio::sync::Mutex as TokioMutex;
@@ -14,6 +14,7 @@ pub mod server {
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use std::fs;
+    use std::net::Ipv4Addr;
     use thiserror::Error;
     use veilid_core::{
         vld0_generate_keypair, CryptoKey, TypedKey, VeilidUpdate, CRYPTO_KIND_VLD0, VALID_CRYPTO_KINDS
@@ -24,17 +25,6 @@ pub mod server {
     use crate::error::{AppError, AppResult};
     use crate::groups;
     use crate::repos;
-
-    #[derive(Deserialize)]
-    pub struct GroupPath {
-        pub group_id: String,
-    }
-
-    #[derive(Deserialize)]
-    pub struct GroupRepoPath {
-        pub group_id: String,
-        pub repo_id: String,
-    }
 
     #[derive(Error, Debug)]
     pub enum BackendError {
@@ -72,6 +62,13 @@ pub mod server {
     pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> anyhow::Result<()> {
         log_debug!(TAG, "start_server: Using socket path: {:?}", server_socket_path);
 
+        let lan_address = Ipv4Addr::UNSPECIFIED; // 0.0.0.0
+        let lan_port = 8080;
+
+        panic::set_hook(Box::new(|panic_info| {
+            log::error!("Panic occurred: {:?}", panic_info);
+        }));
+
         if env::var("HOME").is_err() {
             env::set_var("HOME", backend_base_directory);
         }
@@ -86,17 +83,19 @@ pub mod server {
             backend.start().await.context("Backend failed to start");
         }
 
+        log_info!(TAG, "Backend started");
+
         let web_server = HttpServer::new(move || {
             App::new()
-            .app_data(web::JsonConfig::default().limit(4096))  // Limit payload size to 4kb
             .service(status)
             .service(
                 web::scope("/api")
                     .service(groups::scope())
-                    .service(repos::scope())
+                    // .service(repos::scope())
             )
         })
         .bind_uds(server_socket_path)?
+        .bind((lan_address, lan_port))?
         .run();
 
         log_info!(TAG, "Web server started");

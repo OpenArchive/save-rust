@@ -1,20 +1,25 @@
     use actix_web::{web, get, post, Responder, HttpResponse};
+    use save_dweb_backend::common::DHTEntity;
     use serde_json::json;
     use crate::models::{RequestName, SnowbirdGroup};
     use crate::error::AppResult;
     use crate::logging::android_log;
     use crate::log_debug;
+    use crate::repos;
     use crate::constants::TAG;
     use crate::server::server::get_backend;
     use crate::utils::create_veilid_cryptokey_from_base64;
     use crate::models::IntoSnowbirdGroupsWithNames;
-    use save_dweb_backend::common::DHTEntity;
 
     pub fn scope() -> actix_web::Scope {
         web::scope("/groups")
             .service(get_groups)
-            .service(get_group)
             .service(create_group)
+            .service(
+                web::scope("/{group_id}")
+                    .service(get_group)
+                    .service(repos::scope())
+            )
     }
 
     #[get("")]
@@ -26,13 +31,12 @@
         Ok(HttpResponse::Ok().json(json!({ "groups": snowbird_groups })))
     }
 
-    #[get("/{group_id}")]
+    #[get("")]
     async fn get_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
         let backend = get_backend().await?;
         log_debug!(TAG, "got backend");
 
         let group_id = group_id.into_inner();
-        // let key_string = "nN7W0-JiuhIcCWhy4Sw0J7mfDWWE9OtnCfAbLmwLbq0";
         let key = create_veilid_cryptokey_from_base64(group_id.as_str()).unwrap();
         log_debug!(TAG, "got key {}", key);
 

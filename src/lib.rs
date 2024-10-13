@@ -9,6 +9,7 @@ pub mod jni_globals;
 pub mod logging;
 pub mod groups;
 pub mod repos;
+pub mod media;
 pub mod server;
 pub mod models;
 pub mod status_updater;

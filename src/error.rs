@@ -18,8 +18,15 @@ impl std::fmt::Debug for AppError {
     }
 }
 
+// impl<E: Error + Send + Sync + 'static> From<E> for AppError {
+//     fn from(error: E) -> Self {
+//         AppError(AnyhowError::new(error))
+//     }
+// }
+
 impl ResponseError for AppError {
     fn error_response(&self) -> HttpResponse {
+        log::error!("AppError occurred: {:?}", self);
         HttpResponse::InternalServerError().json(format!("Something went wrong: {}", self.0))
     }
 }

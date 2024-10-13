@@ -5215,6 +5215,7 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "anyhow",
+ "async-trait",
  "base64-url",
  "blake3",
  "crossbeam-channel",
