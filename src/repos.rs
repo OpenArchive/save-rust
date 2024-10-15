@@ -1,11 +1,11 @@
+use crate::constants::TAG;
 use crate::error::{AppError, AppResult};
+use crate::log_debug;
+use crate::logging::android_log;
 use crate::media;
 use crate::models::{AsyncFrom, GroupPath, GroupRepoPath, SnowbirdRepo};
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
-use crate::logging::android_log;
-use crate::log_debug;
-use crate::constants::TAG;
 use actix_web::{get, post, web, HttpResponse, Responder, Scope};
 use save_dweb_backend::common::DHTEntity;
 use save_dweb_backend::group::Group;
@@ -17,7 +17,7 @@ pub fn scope() -> Scope {
     web::scope("/repos")
         .service(create_repo)
         .service(get_repo)
-        .service(list_repos) 
+        .service(list_repos)
         .service(media::scope())
 }
 
@@ -58,7 +58,7 @@ async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     // Fetch the repo from the group
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
     let repo = group.get_repo(&repo_crypto_key);
-    
+
     // First, handle the Result to get &Box<Repo>
     let repo_box_ref = repo?;
 
@@ -89,19 +89,16 @@ async fn create_repo(
 
     let repo = group.create_repo().await?;
 
+    log_debug!(
+        TAG,
+        "Setting name '{}' on new repo {}",
+        repo_data.name,
+        repo.id()
+    );
     repo.set_name(&repo_data.name).await?;
 
-    // First, handle the Result to get &Box<Repo>
-    let repo_box_ref = repo;
-
-    // Then, dereference to get &Repo
-    let repo_ref = &**repo_box_ref;
-
-    // If Repo implements Clone, clone it to get an owned Repo
-    let repo_owned = repo_ref.clone();
-    
-   // Now, convert the owned Repo into SnowbirdRepo
-    let snowbird_repo: SnowbirdRepo = repo_owned.into();
+    // Now, convert the owned Repo into SnowbirdRepo
+    let snowbird_repo: SnowbirdRepo = SnowbirdRepo::async_from(*repo.to_owned()).await;
 
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
@@ -118,6 +115,6 @@ async fn get_snowbird_repos(group: &Group) -> Result<Vec<SnowbirdRepo>, AppError
         let snowbird_repo = SnowbirdRepo::async_from(repo.as_ref().clone()).await;
         snowbird_repos.push(snowbird_repo);
     }
-    
+
     Ok(snowbird_repos)
 }

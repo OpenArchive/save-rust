@@ -1,92 +1,91 @@
-    use actix_web::{web, get, post, Responder, HttpResponse};
-    use save_dweb_backend::common::DHTEntity;
-    use serde_json::json;
-    use crate::models::{RequestName, SnowbirdGroup};
-    use crate::error::AppResult;
-    use crate::logging::android_log;
-    use crate::log_debug;
-    use crate::repos;
-    use crate::constants::TAG;
-    use crate::server::server::get_backend;
-    use crate::utils::create_veilid_cryptokey_from_base64;
-    use crate::models::IntoSnowbirdGroupsWithNames;
+use crate::constants::TAG;
+use crate::error::AppResult;
+use crate::log_debug;
+use crate::models::IntoSnowbirdGroupsWithNames;
+use crate::models::{RequestName, SnowbirdGroup};
+use crate::repos;
+use crate::server::server::get_backend;
+use crate::utils::create_veilid_cryptokey_from_base64;
+use actix_web::{get, post, web, HttpResponse, Responder};
+use save_dweb_backend::common::DHTEntity;
+use serde_json::json;
 
-    pub fn scope() -> actix_web::Scope {
-        web::scope("/groups")
-            .service(get_groups)
-            .service(create_group)
-            .service(
-                web::scope("/{group_id}")
-                    .service(get_group)
-                    .service(repos::scope())
-            )
-    }
+pub fn scope() -> actix_web::Scope {
+    web::scope("/groups")
+        .service(get_groups)
+        .service(create_group)
+        .service(
+            web::scope("/{group_id}")
+                .service(get_group)
+                .service(repos::scope()),
+        )
+}
 
-    #[get("")]
-    async fn get_groups() -> AppResult<impl Responder> {
-        let backend = get_backend().await?;
-        let groups = backend.list_groups().await.unwrap();
-        let snowbird_groups = groups.into_snowbird_groups_with_names().await;
-    
-        Ok(HttpResponse::Ok().json(json!({ "groups": snowbird_groups })))
-    }
+#[get("")]
+async fn get_groups() -> AppResult<impl Responder> {
+    let backend = get_backend().await?;
+    let groups = backend.list_groups().await.unwrap();
+    let snowbird_groups = groups.into_snowbird_groups_with_names().await;
 
-    #[get("")]
-    async fn get_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
-        let backend = get_backend().await?;
-        log_debug!(TAG, "got backend");
+    Ok(HttpResponse::Ok().json(json!({ "groups": snowbird_groups })))
+}
 
-        let group_id = group_id.into_inner();
-        let key = create_veilid_cryptokey_from_base64(group_id.as_str()).unwrap();
-        log_debug!(TAG, "got key {}", key);
+#[get("")]
+async fn get_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
+    let backend = get_backend().await?;
+    log_debug!(TAG, "got backend");
 
-        let backend_group = backend.get_group(&key).await?;
-        log_debug!(TAG, "got backend group");
+    let group_id = group_id.into_inner();
+    let key = create_veilid_cryptokey_from_base64(group_id.as_str()).unwrap();
+    log_debug!(TAG, "got key {}", key);
 
-        let mut snowbird_group: SnowbirdGroup = backend_group.as_ref().into();
-        log_debug!(TAG, "got snowbird group");
+    let backend_group = backend.get_group(&key).await?;
+    log_debug!(TAG, "got backend group");
 
-        snowbird_group.fill_name(backend_group.as_ref()).await;
+    let mut snowbird_group: SnowbirdGroup = backend_group.as_ref().into();
+    log_debug!(TAG, "got snowbird group");
 
-        Ok(HttpResponse::Ok().json(snowbird_group))
-    }
+    snowbird_group.fill_name(backend_group.as_ref()).await;
 
-    #[post("")]
-    async fn create_group(request_name: web::Json<RequestName>) -> AppResult<impl Responder> {
-        let request = request_name.into_inner();
+    Ok(HttpResponse::Ok().json(snowbird_group))
+}
 
-        log_debug!(TAG, "got body {:?}", request);
+#[post("")]
+async fn create_group(request_name: web::Json<RequestName>) -> AppResult<impl Responder> {
+    let request = request_name.into_inner();
 
-        let backend = get_backend().await?;
-        log_debug!(TAG, "got backend");
+    log_debug!(TAG, "got body {:?}", request);
 
-        let backend_group = backend.create_group().await?;
-        log_debug!(TAG, "got backend group");
-        log_debug!(TAG, "backend url = {}", backend_group.get_url());
+    let backend = get_backend().await?;
+    log_debug!(TAG, "got backend");
 
-        // Set group name using the request
-        backend_group.set_name(&request.name).await?;
+    let backend_group = backend.create_group().await?;
+    log_debug!(TAG, "got backend group");
+    log_debug!(TAG, "backend url = {}", backend_group.get_url());
 
-        let mut snowbird_group: SnowbirdGroup = (&backend_group).into();
-        log_debug!(TAG, "got snowbird group");
+    // Set group name using the request
+    backend_group.set_name(&request.name).await?;
 
-        snowbird_group.name = Some(request.name);
+    let mut snowbird_group: SnowbirdGroup = (&backend_group).into();
+    log_debug!(TAG, "got snowbird group");
 
-        Ok(HttpResponse::Ok().json(snowbird_group))
-    }
+    snowbird_group.name = Some(request.name);
 
-    // Later
-    // #[patch("/{group_id}")]
-    // async fn update_group(path: web::Path<String>) -> AppResult<impl Responder> {
-    //     let backend = get_backend().await?;
+    Ok(HttpResponse::Ok().json(snowbird_group))
+}
 
-    //     let group_id = path.into_inner();
+// Later
+// #[patch("/{group_id}")]
+// async fn update_group(path: web::Path<String>) -> AppResult<impl Responder> {
+//     let backend = get_backend().await?;
 
-    //     // let group = backend.get_group(con).await?;
+//     let group_id = path.into_inner();
 
-    //     // group.set_name("foo").await.expect(dweb::UNABLE_TO_SET_GROUP_NAME);
+//     // let group = backend.get_group(con).await?;
 
-    //     Ok(HttpResponse::Ok().json(json!({
-    //         "name": "My Group"
-    //     })))
-    // }
+//     // group.set_name("foo").await.expect(dweb::UNABLE_TO_SET_GROUP_NAME);
+
+//     Ok(HttpResponse::Ok().json(json!({
+//         "name": "My Group"
+//     })))
+// }
