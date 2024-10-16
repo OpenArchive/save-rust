@@ -2,7 +2,7 @@ use crate::constants::TAG;
 use crate::error::AppResult;
 use crate::log_debug;
 use crate::models::IntoSnowbirdGroupsWithNames;
-use crate::models::{RequestName, SnowbirdGroup};
+use crate::models::{RequestName, SnowbirdGroup, RequestUrl};
 use crate::repos;
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
@@ -14,6 +14,7 @@ pub fn scope() -> actix_web::Scope {
     web::scope("/groups")
         .service(get_groups)
         .service(create_group)
+        .service(join_group_from_url)
         .service(
             web::scope("/{group_id}")
                 .service(get_group)
