@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex, Once};
 use std::thread;
 use veilid_core::veilid_core_setup_android;
 
+
 trait IntoJObject {
     fn into_jobject(&self) -> JObject;
 }
@@ -129,6 +130,7 @@ fn setup_jni_environments(
     with_env(env, |env| Ok(jni_globals::init_jni(&env, clazz)));
 
     let global_context = env.new_global_ref(context)?;
+
 
     update_extended_status(SnowbirdServiceStatus::BackendRunning, Some("hi"))?;
 

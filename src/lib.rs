@@ -7,10 +7,18 @@ pub mod jni_globals;
 #[cfg(target_os = "android")]
 pub mod status_updater;
 
+#[cfg(target_os = "android")]
+pub mod jni_globals;
+
+#[cfg(target_os = "macos")]
+pub mod mac;
+
+pub mod actix_route_dumper;
 pub mod constants;
 pub mod error;
-pub mod groups;
 pub mod logging;
+
+pub mod groups;
 pub mod media;
 pub mod models;
 pub mod repos;

@@ -1,8 +1,3 @@
-// Re-export android_log if it's defined elsewhere
-// #[cfg(target_os = "android")]
-// pub use crate::android_log;
-
-#[cfg(target_os = "android")]
 use std::ffi::CString;
 #[cfg(target_os = "android")]
 use std::os::raw::{c_char, c_int};

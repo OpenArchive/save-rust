@@ -26,6 +26,8 @@ pub mod server {
         vld0_generate_keypair, CryptoKey, TypedKey, VeilidUpdate, CRYPTO_KIND_VLD0,
         VALID_CRYPTO_KINDS,
     };
+    use crate::actix_route_dumper::RouteDumper;
+
 
     #[derive(Error, Debug)]
     pub enum BackendError {
@@ -58,6 +60,11 @@ pub mod server {
             "status": "running",
             "version": *VERSION
         }))
+    }
+
+
+    fn actix_log(message: &str) {
+        log_debug!(TAG, "Actix log: {}", message);
     }
 
     pub async fn start(
@@ -94,12 +101,17 @@ pub mod server {
         log_info!(TAG, "Backend started");
 
         let web_server = HttpServer::new(move || {
-            App::new().service(status).service(
-                web::scope("/api").service(groups::scope()), // .service(repos::scope())
+            App::new()
+            .wrap(RouteDumper::new(actix_log))
+            .service(status)
+            .service(
+                web::scope("/api")
+                    .service(groups::scope())
             )
         })
         .bind_uds(server_socket_path)?
         .bind((lan_address, lan_port))?
+        .disable_signals()
         .run();
 
         log_info!(TAG, "Web server started");

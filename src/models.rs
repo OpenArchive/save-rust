@@ -88,8 +88,8 @@ impl IntoSnowbirdGroupsWithNames for Vec<Box<Group>> {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SnowbirdRepo {
-    pub id: String,
-    pub name: String,
+    pub key: String,
+    pub name: String
 }
 
 #[async_trait::async_trait]
@@ -101,11 +101,8 @@ pub trait AsyncFrom<T> {
 impl AsyncFrom<Repo> for SnowbirdRepo {
     async fn async_from(repo: Repo) -> Self {
         SnowbirdRepo {
-            id: repo.id().to_string(),
-            name: repo
-                .get_name()
-                .await
-                .unwrap_or_else(|_| "Unknown".to_string()),
+            key: repo.id().to_string(),
+            name: repo.get_name().await.unwrap_or_else(|_| "Unknown".to_string()),
         }
     }
 }
@@ -113,8 +110,8 @@ impl AsyncFrom<Repo> for SnowbirdRepo {
 impl From<&Repo> for SnowbirdRepo {
     fn from(repo: &Repo) -> Self {
         SnowbirdRepo {
-            id: repo.id().to_string(),
-            name: "".to_string(),
+            key: repo.id().to_string(),
+            name: "".to_string()
         }
     }
 }
@@ -122,8 +119,8 @@ impl From<&Repo> for SnowbirdRepo {
 impl From<Repo> for SnowbirdRepo {
     fn from(repo: Repo) -> Self {
         SnowbirdRepo {
-            id: repo.id().to_string(),
-            name: "".to_string(),
+            key: repo.id().to_string(),
+            name: "".to_string()
         }
     }
 }

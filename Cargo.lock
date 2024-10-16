@@ -5183,6 +5183,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "save"
+version = "0.1.0"
+dependencies = [
+ "actix-web",
+ "anyhow",
+ "async-trait",
+ "base64-url",
+ "blake3",
+ "crossbeam-channel",
+ "eyre",
+ "futures",
+ "jni 0.21.1",
+ "lazy_static",
+ "once_cell",
+ "save-dweb-backend",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "veilid-core",
+]
+
+[[package]]
 name = "save-dweb-backend"
 version = "0.1.0"
 source = "git+https://github.com/OpenArchive/save-dweb-backend#3d754d8f79f33c63cb430da25b5dd8d56c1abe30"
