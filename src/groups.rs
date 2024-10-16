@@ -74,6 +74,26 @@ async fn create_group(request_name: web::Json<RequestName>) -> AppResult<impl Re
     Ok(HttpResponse::Ok().json(snowbird_group))
 }
 
+#[post("/join_from_url")]
+async fn join_group_from_url(request_url: web::Json<RequestUrl>) -> AppResult<impl Responder> {
+    let request = request_url.into_inner();
+
+    log_debug!(TAG, "Received request with URL: {:?}", request.url);
+
+    let backend = get_backend().await?;
+    log_debug!(TAG, "Obtained backend instance");
+
+    let backend_group = backend.join_from_url(&request.url).await?;
+    log_debug!(TAG, "Joined backend group successfully");
+
+    let mut snowbird_group: SnowbirdGroup = (&backend_group).into();
+    log_debug!(TAG, "Converted to SnowbirdGroup");
+
+    snowbird_group.fill_name(backend_group.as_ref()).await;
+    log_debug!(TAG, "Filled group name");
+
+    Ok(HttpResponse::Ok().json(snowbird_group))
+}
 // Later
 // #[patch("/{group_id}")]
 // async fn update_group(path: web::Path<String>) -> AppResult<impl Responder> {
