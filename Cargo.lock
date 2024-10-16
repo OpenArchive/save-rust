@@ -5201,6 +5201,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tmpdir",
  "tokio",
  "veilid-core",
 ]
@@ -5208,7 +5209,7 @@ dependencies = [
 [[package]]
 name = "save-dweb-backend"
 version = "0.1.0"
-source = "git+https://github.com/OpenArchive/save-dweb-backend#3d754d8f79f33c63cb430da25b5dd8d56c1abe30"
+source = "git+https://github.com/OpenArchive/save-dweb-backend?branch=main#638ed7424373ec23866271e9a673a1d0924f38b0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5230,30 +5231,6 @@ dependencies = [
  "veilid-core",
  "veilid-iroh-blobs",
  "xdg",
-]
-
-[[package]]
-name = "save-rust"
-version = "0.1.0"
-dependencies = [
- "actix-web",
- "anyhow",
- "async-trait",
- "base64-url",
- "blake3",
- "crossbeam-channel",
- "eyre",
- "futures",
- "jni 0.21.1",
- "lazy_static",
- "once_cell",
- "save-dweb-backend",
- "serde",
- "serde_json",
- "thiserror",
- "tmpdir",
- "tokio",
- "veilid-core",
 ]
 
 [[package]]
