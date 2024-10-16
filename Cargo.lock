@@ -5196,6 +5196,7 @@ dependencies = [
  "futures",
  "jni 0.21.1",
  "lazy_static",
+ "num_cpus",
  "once_cell",
  "save-dweb-backend",
  "serde",
@@ -5208,7 +5209,7 @@ dependencies = [
 [[package]]
 name = "save-dweb-backend"
 version = "0.1.0"
-source = "git+https://github.com/OpenArchive/save-dweb-backend#3d754d8f79f33c63cb430da25b5dd8d56c1abe30"
+source = "git+https://github.com/OpenArchive/save-dweb-backend#638ed7424373ec23866271e9a673a1d0924f38b0"
 dependencies = [
  "anyhow",
  "async-stream",

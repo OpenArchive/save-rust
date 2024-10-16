@@ -19,8 +19,3 @@ pub mod media;
 pub mod server;
 pub mod models;
 pub mod utils;
-
-// Common function for both Android and non-Android
-// pub async fn run_server(host: &str, port: &str) -> Result<()> {
-//     start(host, port).await
-// }
