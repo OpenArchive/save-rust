@@ -1,7 +1,6 @@
 use crate::constants::TAG;
 use crate::error::AppResult;
 use crate::log_info;
-use crate::logging::android_log;
 use crate::models::GroupRepoPath;
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;

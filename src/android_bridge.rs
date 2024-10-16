@@ -3,8 +3,6 @@ use crate::constants::TAG;
 use crate::jni_globals;
 use crate::logging::android_log;
 use crate::server::server::start;
-use crate::status_updater::update_extended_status;
-use crate::status_updater::SnowbirdServiceStatus;
 use crate::{log_debug, log_error, log_info};
 use jni::errors::Result as JniResult;
 use jni::sys::{jint, jstring};
@@ -130,9 +128,6 @@ fn setup_jni_environments(
     with_env(env, |env| Ok(jni_globals::init_jni(&env, clazz)));
 
     let global_context = env.new_global_ref(context)?;
-
-
-    update_extended_status(SnowbirdServiceStatus::BackendRunning, Some("hi"))?;
 
     // Use a new JNIEnv for jni_smoke_test
     with_env(env, |env| {

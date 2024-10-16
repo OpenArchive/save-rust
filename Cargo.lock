@@ -5196,6 +5196,7 @@ dependencies = [
  "futures",
  "jni 0.21.1",
  "lazy_static",
+ "num_cpus",
  "once_cell",
  "save-dweb-backend",
  "serde",
