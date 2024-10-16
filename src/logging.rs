@@ -2,9 +2,12 @@
 // #[cfg(target_os = "android")]
 // pub use crate::android_log;
 
+#[cfg(target_os = "android")]
 use std::ffi::CString;
+#[cfg(target_os = "android")]
 use std::os::raw::{c_char, c_int};
 
+#[cfg(target_os = "android")]
 #[link(name = "log")]
 extern "C" {
     pub fn __android_log_print(prio: c_int, tag: *const c_char, fmt: *const c_char, ...) -> c_int;
@@ -25,16 +28,20 @@ pub fn android_log(level: i32, tag: &str, msg: &str) {
 }
 
 // Define log levels
-#[allow(dead_code)] pub const LOG_LEVEL_DEBUG: i32 = 3;
-#[allow(dead_code)] pub const LOG_LEVEL_INFO: i32 = 4;
-#[allow(dead_code)] pub const LOG_LEVEL_WARN: i32 = 5;
-#[allow(dead_code)] pub const LOG_LEVEL_ERROR: i32 = 6;
+#[allow(dead_code)]
+pub const LOG_LEVEL_DEBUG: i32 = 3;
+#[allow(dead_code)]
+pub const LOG_LEVEL_INFO: i32 = 4;
+#[allow(dead_code)]
+pub const LOG_LEVEL_WARN: i32 = 5;
+#[allow(dead_code)]
+pub const LOG_LEVEL_ERROR: i32 = 6;
 
 // Main logging macro
 #[macro_export]
 macro_rules! android_log_print {
     ($level:expr, $tag:expr, $($arg:tt)*) => {
-        android_log($level, $tag, &format!("[{}:{}] {}", file!(), line!(), format_args!($($arg)*)))
+        crate::logging::android_log($level, $tag, &format!("[{}:{}] {}", file!(), line!(), format_args!($($arg)*)))
     }
 }
 

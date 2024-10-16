@@ -4,6 +4,9 @@ use anyhow::Error as AnyhowError;
 use base64_url::base64;
 use eyre::ErrReport;
 
+use crate::constants::TAG;
+use crate::log_error;
+
 pub struct AppError(pub AnyhowError);
 
 impl std::fmt::Display for AppError {
@@ -26,7 +29,7 @@ impl std::fmt::Debug for AppError {
 
 impl ResponseError for AppError {
     fn error_response(&self) -> HttpResponse {
-        log::error!("AppError occurred: {:?}", self);
+        log_error!(TAG, "AppError occurred: {:?}", self);
         HttpResponse::InternalServerError().json(format!("Something went wrong: {}", self.0))
     }
 }
@@ -51,7 +54,10 @@ impl From<AnyhowError> for AppError {
 
 impl From<Vec<u8>> for AppError {
     fn from(vec: Vec<u8>) -> Self {
-        AppError(anyhow!("Invalid key length: expected 32 bytes, got {}", vec.len()))
+        AppError(anyhow!(
+            "Invalid key length: expected 32 bytes, got {}",
+            vec.len()
+        ))
     }
 }
 

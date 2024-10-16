@@ -13,8 +13,8 @@ use serde_json::json;
 
 pub fn scope() -> Scope {
     web::scope("/media")
-        .service(upload_file) 
-        .service(list_files) 
+        .service(upload_file)
+        .service(list_files)
         .service(download_file)
         .service(delete_file)
 }
@@ -162,7 +162,7 @@ async fn upload_file(
         .map_err(|e| anyhow::anyhow!("Repo not found: {}", e))?;
 
     // Log file_name and stream file content
-    log::info!("Uploading file: {}", file_name);
+    //log::info!("Uploading file: {}", file_name);
     let mut file_data: Vec<u8> = Vec::new();
     while let Some(chunk) = body.next().await {
         let chunk = chunk.map_err(|e| anyhow::anyhow!("Failed to read file chunk: {}", e))?;
@@ -174,7 +174,7 @@ async fn upload_file(
         return Err(anyhow::anyhow!("File content is empty").into());
     }
 
-    log::info!("Uploading file: {}", file_name);
+    //log::info!("Uploading file: {}", file_name);
 
     // Upload the file
     let file_hash = repo
@@ -182,7 +182,7 @@ async fn upload_file(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
 
-    log::info!("Updating DHT with hash: {}", file_hash);
+    //log::info!("Updating DHT with hash: {}", file_hash);
 
     // After uploading, update the DHT with the new file’s hash
     let updated_collection_hash = repo
