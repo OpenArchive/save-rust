@@ -2,9 +2,9 @@ use crate::error::AppResult;
 use crate::models::GroupRepoPath;
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
-// use crate::logging::android_log;
-// use crate::log_debug;
-// use crate::constants::TAG;
+use crate::log_info;
+use crate::logging::android_log;
+use crate::constants::TAG;
 use actix_web::{delete, get, post, web, HttpResponse, Responder, Scope};
 use futures::StreamExt;
 use save_dweb_backend::common::DHTEntity;
@@ -15,8 +15,11 @@ pub fn scope() -> Scope {
     web::scope("/media")
         .service(upload_file) 
         .service(list_files) 
-        .service(download_file)
-        .service(delete_file)
+        .service(
+            web::scope("/{media_id}")
+            .service(delete_file)
+            .service(download_file)
+        ) 
 }
 
 #[derive(Deserialize)]
@@ -24,7 +27,7 @@ struct MediaQuery {
     file_name: String,
 }
 
-#[get("/{repo_id}/media")]
+#[get("")]
 async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
@@ -64,7 +67,7 @@ async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder>
     Ok(HttpResponse::Ok().json(files_with_status))
 }
 
-#[get("/{repo_id}/media")]
+#[get("")]
 async fn download_file(
     path: web::Path<GroupRepoPath>,
     query: web::Query<MediaQuery>,
@@ -107,7 +110,7 @@ async fn download_file(
         .body(file_data))
 }
 
-#[delete("/{repo_id}/media")]
+#[delete("")]
 async fn delete_file(
     path: web::Path<GroupRepoPath>,
     query: web::Query<MediaQuery>,
@@ -132,7 +135,7 @@ async fn delete_file(
     Ok(HttpResponse::Ok().json(collection_hash))
 }
 
-#[post("/{repo_id}/media")]
+#[post("")]
 async fn upload_file(
     path: web::Path<GroupRepoPath>,
     query: web::Query<MediaQuery>,
@@ -162,7 +165,7 @@ async fn upload_file(
         .map_err(|e| anyhow::anyhow!("Repo not found: {}", e))?;
 
     // Log file_name and stream file content
-    log::info!("Uploading file: {}", file_name);
+    log_info!(TAG, "Uploading file: {}", file_name);
     let mut file_data: Vec<u8> = Vec::new();
     while let Some(chunk) = body.next().await {
         let chunk = chunk.map_err(|e| anyhow::anyhow!("Failed to read file chunk: {}", e))?;
@@ -174,7 +177,7 @@ async fn upload_file(
         return Err(anyhow::anyhow!("File content is empty").into());
     }
 
-    log::info!("Uploading file: {}", file_name);
+    log_info!(TAG, "Uploading file: {}", file_name);
 
     // Upload the file
     let file_hash = repo
@@ -182,7 +185,7 @@ async fn upload_file(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
 
-    log::info!("Updating DHT with hash: {}", file_hash);
+    log_info!(TAG, "Updating DHT with hash: {}", file_hash);
 
     // After uploading, update the DHT with the new file’s hash
     let updated_collection_hash = repo

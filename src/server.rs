@@ -19,6 +19,7 @@ pub mod server {
     use veilid_core::{
         vld0_generate_keypair, CryptoKey, TypedKey, VeilidUpdate, CRYPTO_KIND_VLD0, VALID_CRYPTO_KINDS
     };
+    use crate::actix_route_dumper::RouteDumper;
     use crate::{log_debug, log_info, log_error};
     use crate::logging::android_log;
     use crate::constants::{self, TAG, VERSION};
@@ -59,6 +60,10 @@ pub mod server {
         }))
     }
 
+    fn actix_log(message: &str) {
+        log_debug!(TAG, "Actix log: {}", message);
+    }
+
     pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> anyhow::Result<()> {
         log_debug!(TAG, "start_server: Using socket path: {:?}", server_socket_path);
 
@@ -66,7 +71,7 @@ pub mod server {
         let lan_port = 8080;
 
         panic::set_hook(Box::new(|panic_info| {
-            log::error!("Panic occurred: {:?}", panic_info);
+            log_error!(TAG, "Panic occurred: {:?}", panic_info);
         }));
 
         if env::var("HOME").is_err() {
@@ -87,15 +92,16 @@ pub mod server {
 
         let web_server = HttpServer::new(move || {
             App::new()
+            .wrap(RouteDumper::new(actix_log))
             .service(status)
             .service(
                 web::scope("/api")
                     .service(groups::scope())
-                    // .service(repos::scope())
             )
         })
         .bind_uds(server_socket_path)?
         .bind((lan_address, lan_port))?
+        .disable_signals()
         .run();
 
         log_info!(TAG, "Web server started");

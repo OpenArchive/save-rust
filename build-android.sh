@@ -11,15 +11,21 @@ cd $BUILD_DIR
 JNI_DIR=$HOME/Projects/save-android/app/src/main/jniLibs
 mkdir -p $JNI_DIR
 
-# Set up cargo-ndk
-# cargo install cargo-ndk
+# Make sure we're on the latest all the time
+#
+cargo update save-dweb-backend
+
+# Add this target if we need to support older devices.
 # armv7-linux-androideabi
+#
 rustup target add \
-        aarch64-linux-android \
-         \
+        aarch64-linux-android 
 
 # Build the android libraries in the jniLibs directory
+#
+# Add this target if we need to support older devices.
 # armeabi-v7a
+#
 cargo ndk -o $JNI_DIR \
         --manifest-path ../Cargo.toml \
         -t arm64-v8a \

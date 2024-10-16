@@ -3,6 +3,9 @@ use anyhow::anyhow;
 use anyhow::Error as AnyhowError;
 use base64_url::base64;
 use eyre::ErrReport;
+use crate::log_error;
+use crate::logging::android_log;
+use crate::constants::TAG;
 
 pub struct AppError(pub AnyhowError);
 
@@ -26,7 +29,7 @@ impl std::fmt::Debug for AppError {
 
 impl ResponseError for AppError {
     fn error_response(&self) -> HttpResponse {
-        log::error!("AppError occurred: {:?}", self);
+        log_error!(TAG, "AppError occurred: {:?}", self);
         HttpResponse::InternalServerError().json(format!("Something went wrong: {}", self.0))
     }
 }

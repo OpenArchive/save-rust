@@ -3,7 +3,6 @@ use jni::{objects::GlobalRef, objects::JClass, objects::JObject, objects::JMetho
 use jni::sys::{jint, jstring};
 use jni::errors::Result as JniResult;
 use lazy_static::lazy_static;
-use log::{debug, error, info};
 use std::error::Error;
 use std::sync::{Arc, Once, Mutex};
 use std::thread;
@@ -13,8 +12,6 @@ use crate::{log_debug, log_info, log_error};
 use crate::logging::android_log;
 use crate::constants::TAG;
 use crate::jni_globals;
-use crate::status_updater::update_extended_status;
-use crate::status_updater::SnowbirdServiceStatus;
 
 trait IntoJObject {
     fn into_jobject(&self) -> JObject;
@@ -119,8 +116,6 @@ fn setup_jni_environments(env: &mut JNIEnv, context: JObject, clazz: JClass) -> 
 
     let global_context = env.new_global_ref(context)?;
     
-    update_extended_status(SnowbirdServiceStatus::BackendRunning, Some("hi"))?;
-
     // Use a new JNIEnv for jni_smoke_test
     with_env(env, |env| jni_smoke_test(env, global_context.into_jobject()))?;
 

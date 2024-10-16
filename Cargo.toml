@@ -1,5 +1,5 @@
 [package]
-name = "save-rust"
+name = "save"
 version = "0.1.0"
 authors = ["Richard Puckett <richard@open-archive.org"]
 description = "Decentralized Web for Save"
@@ -8,11 +8,23 @@ publish = false
 
 [lib]
 name = "save"
+path = "src/lib.rs"
 crate-type = ["staticlib", "cdylib"]
 
+[[bin]]
+name = "save"
+path = "src/main.rs"
+
 [features]
+macos = []
 android = []
 ios = []
+
+# Increases build time by... a lot. Too much for dev.
+# [profile.release]
+# opt-level = 3
+# lto = true
+# codegen-units = 1
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -26,7 +38,6 @@ lazy_static = "1.4"
 actix-web = { version = "4", features = ["macros"] }
 futures = "0.3"
 eyre = "0.6.12"
-log = "0.4.22"
 veilid-core = { git = "https://gitlab.com/veilid/veilid.git", branch = "main" }
 once_cell = "1.20.1"
 base64-url = "3.0.0"

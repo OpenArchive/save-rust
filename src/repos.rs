@@ -16,9 +16,12 @@ use serde_json::json;
 pub fn scope() -> Scope {
     web::scope("/repos")
         .service(create_repo)
-        .service(get_repo)
-        .service(list_repos) 
-        .service(media::scope())
+        .service(list_repos)
+        .service(
+            web::scope("/{repo_id}")
+                .service(get_repo)
+                .service(media::scope())
+        ) 
 }
 
 #[derive(Deserialize)]
@@ -44,7 +47,7 @@ async fn list_repos(path: web::Path<GroupPath>) -> AppResult<impl Responder> {
     Ok(HttpResponse::Ok().json(json!({ "repos": snowbird_repos })))
 }
 
-#[get("/{repo_id}")]
+#[get("")]
 async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
@@ -79,6 +82,8 @@ async fn create_repo(
     path: web::Path<String>,
     body: web::Json<CreateRepoRequest>,
 ) -> AppResult<impl Responder> {
+    log_debug!(TAG, "start");
+    
     let group_id = path.into_inner();
     let repo_data = body.into_inner();
 
@@ -101,7 +106,11 @@ async fn create_repo(
     let repo_owned = repo_ref.clone();
     
    // Now, convert the owned Repo into SnowbirdRepo
-    let snowbird_repo: SnowbirdRepo = repo_owned.into();
+    let mut snowbird_repo: SnowbirdRepo = repo_owned.into();
+
+    snowbird_repo.name = repo_data.name.clone();
+
+    log_debug!(TAG, "returning snowbird repo");
 
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
@@ -118,6 +127,6 @@ async fn get_snowbird_repos(group: &Group) -> Result<Vec<SnowbirdRepo>, AppError
         let snowbird_repo = SnowbirdRepo::async_from(repo.as_ref().clone()).await;
         snowbird_repos.push(snowbird_repo);
     }
-    
+
     Ok(snowbird_repos)
 }
