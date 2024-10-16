@@ -7,9 +7,6 @@ pub mod jni_globals;
 #[cfg(target_os = "android")]
 pub mod status_updater;
 
-#[cfg(target_os = "android")]
-pub mod jni_globals;
-
 #[cfg(target_os = "macos")]
 pub mod mac;
 
@@ -34,6 +31,8 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use server::server::{get_backend, init_backend, status, BACKEND};
     use tmpdir::TmpDir;
+    use crate::media::{download_file, upload_file, scope}; 
+    use crate::models::GroupRepoPath;
 
     #[derive(Serialize, Deserialize)]
     struct GroupsResponse {
@@ -96,6 +95,9 @@ mod tests {
 
         assert_eq!(repo.name, "example repo".to_string());
 
+        // Add a short sleep to ensure the async repo creation has completed
+        tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
+
         let req = test::TestRequest::default()
             .uri(format!("/api/groups/{}/repos", group.key).as_str())
             .to_request();
@@ -111,4 +113,53 @@ mod tests {
 
         Ok(())
     }
+
+    
+#[actix_web::test]
+async fn test_upload_file() -> Result<()> {
+    let mut app = test::init_service(
+        App::new().service(
+            scope()
+        )
+    ).await;
+
+    let group_repo_path = GroupRepoPath {
+        group_id: "test_group".to_string(),
+        repo_id: "test_repo".to_string(),
+    };
+
+    let payload = web::Bytes::from_static(b"test file content");
+    let req = test::TestRequest::post()
+        .uri("/media")
+        .set_payload(payload)
+        .to_request();
+
+    let resp = test::call_service(&mut app, req).await;
+    assert!(resp.status().is_success());
+
+    Ok(())
+}
+
+#[actix_web::test]
+async fn test_download_file() -> Result<()> {
+    let mut app = test::init_service(
+        App::new().service(
+            scope()
+        )
+    ).await;
+
+    let group_repo_path = GroupRepoPath {
+        group_id: "test_group".to_string(),
+        repo_id: "test_repo".to_string(),
+    };
+
+    let req = test::TestRequest::get()
+        .uri("/media")
+        .to_request();
+
+    let resp = test::call_service(&mut app, req).await;
+    assert!(resp.status().is_success());
+
+    Ok(())
+}
 }
