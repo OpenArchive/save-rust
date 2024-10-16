@@ -7,9 +7,6 @@ use crate::log_error;
 use crate::logging::android_log;
 use crate::constants::TAG;
 
-use crate::constants::TAG;
-use crate::log_error;
-
 pub struct AppError(pub AnyhowError);
 
 impl std::fmt::Display for AppError {
