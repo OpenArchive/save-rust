@@ -165,7 +165,9 @@ async fn upload_file(
         .map_err(|e| anyhow::anyhow!("Repo not found: {}", e))?;
 
     // Log file_name and stream file content
+
     log_info!(TAG, "Uploading file: {}", file_name);
+
     let mut file_data: Vec<u8> = Vec::new();
     while let Some(chunk) = body.next().await {
         let chunk = chunk.map_err(|e| anyhow::anyhow!("Failed to read file chunk: {}", e))?;
@@ -177,6 +179,7 @@ async fn upload_file(
         return Err(anyhow::anyhow!("File content is empty").into());
     }
 
+
     log_info!(TAG, "Uploading file: {}", file_name);
 
     // Upload the file
@@ -186,6 +189,7 @@ async fn upload_file(
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
 
     log_info!(TAG, "Updating DHT with hash: {}", file_hash);
+
 
     // After uploading, update the DHT with the new file’s hash
     let updated_collection_hash = repo

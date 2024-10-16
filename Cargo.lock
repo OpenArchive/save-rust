@@ -869,9 +869,9 @@ dependencies = [
 
 [[package]]
 name = "capnp"
-version = "0.19.7"
+version = "0.19.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff5e468996c73ea6d3d2bffc2b738782487f878286615b7f76e11af15a9ada3f"
+checksum = "4e985a566bdaae9a428a957d12b10c318d41b2afddb54cfbb764878059df636e"
 dependencies = [
  "embedded-io 0.6.1",
 ]
@@ -2686,9 +2686,9 @@ dependencies = [
 
 [[package]]
 name = "impl-more"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "206ca75c9c03ba3d4ace2460e57b189f39f43de612c2f85836e65c929701bb2d"
+checksum = "e658178c10c747241199382079c0f195ce229866fbf4aa0d46fa6107fe33d2ec"
 
 [[package]]
 name = "indent"
@@ -5230,6 +5230,30 @@ dependencies = [
  "veilid-core",
  "veilid-iroh-blobs",
  "xdg",
+]
+
+[[package]]
+name = "save-rust"
+version = "0.1.0"
+dependencies = [
+ "actix-web",
+ "anyhow",
+ "async-trait",
+ "base64-url",
+ "blake3",
+ "crossbeam-channel",
+ "eyre",
+ "futures",
+ "jni 0.21.1",
+ "lazy_static",
+ "once_cell",
+ "save-dweb-backend",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tmpdir",
+ "tokio",
+ "veilid-core",
 ]
 
 [[package]]

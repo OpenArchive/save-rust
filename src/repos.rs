@@ -1,11 +1,11 @@
+use crate::constants::TAG;
 use crate::error::{AppError, AppResult};
+use crate::log_debug;
+use crate::logging::android_log;
 use crate::media;
 use crate::models::{AsyncFrom, GroupPath, GroupRepoPath, SnowbirdRepo};
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
-use crate::logging::android_log;
-use crate::log_debug;
-use crate::constants::TAG;
 use actix_web::{get, post, web, HttpResponse, Responder, Scope};
 use save_dweb_backend::common::DHTEntity;
 use save_dweb_backend::group::Group;
@@ -61,7 +61,7 @@ async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     // Fetch the repo from the group
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
     let repo = group.get_repo(&repo_crypto_key);
-    
+
     // First, handle the Result to get &Box<Repo>
     let repo_box_ref = repo?;
 
@@ -94,6 +94,12 @@ async fn create_repo(
 
     let repo = group.create_repo().await?;
 
+    log_debug!(
+        TAG,
+        "Setting name '{}' on new repo {}",
+        repo_data.name,
+        repo.id()
+    );
     repo.set_name(&repo_data.name).await?;
 
     // First, handle the Result to get &Box<Repo>

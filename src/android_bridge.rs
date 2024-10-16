@@ -1,17 +1,23 @@
 #![allow(unused)]
-use jni::{objects::GlobalRef, objects::JClass, objects::JObject, objects::JMethodID, objects::JString, objects::JValue, objects::JValueGen, JNIEnv, JavaVM};
-use jni::sys::{jint, jstring};
-use jni::errors::Result as JniResult;
-use lazy_static::lazy_static;
-use std::error::Error;
-use std::sync::{Arc, Once, Mutex};
-use std::thread;
-use veilid_core::veilid_core_setup_android;
-use crate::server::server::start;
-use crate::{log_debug, log_info, log_error};
-use crate::logging::android_log;
 use crate::constants::TAG;
 use crate::jni_globals;
+use crate::logging::android_log;
+use crate::server::server::start;
+use crate::status_updater::update_extended_status;
+use crate::status_updater::SnowbirdServiceStatus;
+use crate::{log_debug, log_error, log_info};
+use jni::errors::Result as JniResult;
+use jni::sys::{jint, jstring};
+use jni::{
+    objects::GlobalRef, objects::JClass, objects::JMethodID, objects::JObject, objects::JString,
+    objects::JValue, objects::JValueGen, JNIEnv, JavaVM,
+};
+use lazy_static::lazy_static;
+use std::error::Error;
+use std::sync::{Arc, Mutex, Once};
+use std::thread;
+use veilid_core::veilid_core_setup_android;
+
 
 trait IntoJObject {
     fn into_jobject(&self) -> JObject;
@@ -44,7 +50,7 @@ pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_Sn
     clazz: JClass,
     context: JObject,
     backend_base_directory: JString,
-    server_socket_path: JString
+    server_socket_path: JString,
 ) -> jstring {
     let env_ptr = env.get_native_interface();
 
@@ -75,14 +81,19 @@ pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_Sn
     std::thread::spawn(move || {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            start(&backend_base_directory_clone, &server_socket_path_clone).await.unwrap();
+            start(&backend_base_directory_clone, &server_socket_path_clone)
+                .await
+                .unwrap();
         });
     });
 
     log_debug!(TAG, "Bridge startup complete.");
 
     let output = env
-        .new_string(format!("Server started on Unix socket: {}", server_socket_path))
+        .new_string(format!(
+            "Server started on Unix socket: {}",
+            server_socket_path
+        ))
         .expect("Couldn't create java string!");
 
     output.into_raw()
@@ -93,7 +104,7 @@ pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_Sn
 pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_SnowbirdBridge_stopServer(
     mut env: JNIEnv,
     _clazz: JClass,
-    ctx: JObject
+    ctx: JObject,
 ) -> jstring {
     let output = env
         .new_string("Server stopped")
@@ -111,13 +122,22 @@ where
     f(new_env)
 }
 
-fn setup_jni_environments(env: &mut JNIEnv, context: JObject, clazz: JClass) -> Result<(), Box<dyn Error>> {
+fn setup_jni_environments(
+    env: &mut JNIEnv,
+    context: JObject,
+    clazz: JClass,
+) -> Result<(), Box<dyn Error>> {
     with_env(env, |env| Ok(jni_globals::init_jni(&env, clazz)));
 
     let global_context = env.new_global_ref(context)?;
-    
+
+
+    update_extended_status(SnowbirdServiceStatus::BackendRunning, Some("hi"))?;
+
     // Use a new JNIEnv for jni_smoke_test
-    with_env(env, |env| jni_smoke_test(env, global_context.into_jobject()))?;
+    with_env(env, |env| {
+        jni_smoke_test(env, global_context.into_jobject())
+    })?;
 
     // Use another new JNIEnv for veilid_core_setup_android
     with_env(env, |env| {
@@ -131,7 +151,10 @@ fn setup_jni_environments(env: &mut JNIEnv, context: JObject, clazz: JClass) -> 
 // Used this to figure out how to JNI back into the Android app.
 // Keeping for reference, or future tests.
 //
-fn jni_smoke_test<'local>(mut env: JNIEnv<'local>, context: JObject<'local>) -> Result<(), Box<dyn std::error::Error>> {
+fn jni_smoke_test<'local>(
+    mut env: JNIEnv<'local>,
+    context: JObject<'local>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let class_name = "net/opendasharchive/openarchive/services/snowbird/SnowbirdBridge";
     let method_name = "updateStatusFromRust";
     let method_signature = "(ILjava/lang/String;)V";
@@ -148,10 +171,7 @@ fn jni_smoke_test<'local>(mut env: JNIEnv<'local>, context: JObject<'local>) -> 
         class_name,
         method_name,
         method_signature,
-        &[
-            JValue::Int(status_code),
-            error_message_jvalue,
-        ]
+        &[JValue::Int(status_code), error_message_jvalue],
     )?;
 
     Ok(())
