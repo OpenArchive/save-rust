@@ -4,7 +4,6 @@ use anyhow::Error as AnyhowError;
 use base64_url::base64;
 use eyre::ErrReport;
 use crate::log_error;
-use crate::logging::android_log;
 use crate::constants::TAG;
 
 pub struct AppError(pub AnyhowError);
@@ -54,7 +53,10 @@ impl From<AnyhowError> for AppError {
 
 impl From<Vec<u8>> for AppError {
     fn from(vec: Vec<u8>) -> Self {
-        AppError(anyhow!("Invalid key length: expected 32 bytes, got {}", vec.len()))
+        AppError(anyhow!(
+            "Invalid key length: expected 32 bytes, got {}",
+            vec.len()
+        ))
     }
 }
 

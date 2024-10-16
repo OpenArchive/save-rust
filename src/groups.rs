@@ -3,7 +3,6 @@ use save_dweb_backend::common::DHTEntity;
 use serde_json::json;
 use crate::models::{RequestName, SnowbirdGroup};
 use crate::error::AppResult;
-use crate::logging::android_log;
 use crate::log_debug;
 use crate::repos;
 use crate::constants::TAG;

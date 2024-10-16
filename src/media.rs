@@ -1,10 +1,9 @@
+use crate::constants::TAG;
 use crate::error::AppResult;
+use crate::log_info;
 use crate::models::GroupRepoPath;
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
-use crate::log_info;
-use crate::logging::android_log;
-use crate::constants::TAG;
 use actix_web::{delete, get, post, web, HttpResponse, Responder, Scope};
 use futures::StreamExt;
 use save_dweb_backend::common::DHTEntity;
@@ -13,13 +12,13 @@ use serde_json::json;
 
 pub fn scope() -> Scope {
     web::scope("/media")
-        .service(upload_file) 
-        .service(list_files) 
+        .service(upload_file)
+        .service(list_files)
         .service(
             web::scope("/{media_id}")
-            .service(delete_file)
-            .service(download_file)
-        ) 
+                .service(delete_file)
+                .service(download_file),
+        )
 }
 
 #[derive(Deserialize)]
@@ -40,7 +39,7 @@ async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder>
 
     // Fetch the repo
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
-    let repo = group.get_repo(&repo_crypto_key)?;
+    let repo = group.get_repo(&repo_crypto_key).await?;
 
     let hash = repo.get_hash_from_dht().await?;
     if !group.has_hash(&hash).await? {
@@ -84,7 +83,7 @@ async fn download_file(
 
     // Fetch the repo
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
-    let repo = group.get_repo(&repo_crypto_key)?;
+    let repo = group.get_repo(&repo_crypto_key).await?;
 
     let collection_hash = repo.get_hash_from_dht().await?;
     if !group.has_hash(&collection_hash).await? {
@@ -127,7 +126,7 @@ async fn delete_file(
 
     // Fetch the repo
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
-    let repo = group.get_repo(&repo_crypto_key)?;
+    let repo = group.get_repo(&repo_crypto_key).await?;
 
     // Delete the file and update the collection
     let collection_hash = repo.delete_file(file_name).await?;
@@ -162,10 +161,13 @@ async fn upload_file(
         .map_err(|e| anyhow::anyhow!("Invalid repo id: {}", e))?;
     let repo = group
         .get_repo(&repo_crypto_key)
+        .await
         .map_err(|e| anyhow::anyhow!("Repo not found: {}", e))?;
 
     // Log file_name and stream file content
+
     log_info!(TAG, "Uploading file: {}", file_name);
+
     let mut file_data: Vec<u8> = Vec::new();
     while let Some(chunk) = body.next().await {
         let chunk = chunk.map_err(|e| anyhow::anyhow!("Failed to read file chunk: {}", e))?;

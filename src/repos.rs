@@ -1,11 +1,10 @@
+use crate::constants::TAG;
 use crate::error::{AppError, AppResult};
+use crate::log_debug;
 use crate::media;
 use crate::models::{AsyncFrom, GroupPath, GroupRepoPath, SnowbirdRepo};
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
-use crate::logging::android_log;
-use crate::log_debug;
-use crate::constants::TAG;
 use actix_web::{get, post, web, HttpResponse, Responder, Scope};
 use save_dweb_backend::common::DHTEntity;
 use save_dweb_backend::group::Group;
@@ -20,8 +19,8 @@ pub fn scope() -> Scope {
         .service(
             web::scope("/{repo_id}")
                 .service(get_repo)
-                .service(media::scope())
-        ) 
+                .service(media::scope()),
+        )
 }
 
 #[derive(Deserialize)]
@@ -60,19 +59,10 @@ async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
 
     // Fetch the repo from the group
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
-    let repo = group.get_repo(&repo_crypto_key);
-    
-    // First, handle the Result to get &Box<Repo>
-    let repo_box_ref = repo?;
-
-    // Then, dereference to get &Repo
-    let repo_ref = &**repo_box_ref;
-
-    // If Repo implements Clone, clone it to get an owned Repo
-    let repo_owned = repo_ref.clone();
+    let repo = group.get_repo(&repo_crypto_key).await?;
 
     // Now, convert the owned Repo into SnowbirdRepo
-    let snowbird_repo: SnowbirdRepo = repo_owned.into();
+    let snowbird_repo: SnowbirdRepo = repo.into();
 
     Ok(HttpResponse::Ok().json(snowbird_repo))
 }
@@ -83,7 +73,7 @@ async fn create_repo(
     body: web::Json<CreateRepoRequest>,
 ) -> AppResult<impl Responder> {
     log_debug!(TAG, "start");
-    
+
     let group_id = path.into_inner();
     let repo_data = body.into_inner();
 
@@ -94,19 +84,16 @@ async fn create_repo(
 
     let repo = group.create_repo().await?;
 
+    log_debug!(
+        TAG,
+        "Setting name '{}' on new repo {}",
+        repo_data.name,
+        repo.id()
+    );
     repo.set_name(&repo_data.name).await?;
 
-    // First, handle the Result to get &Box<Repo>
-    let repo_box_ref = repo;
-
-    // Then, dereference to get &Repo
-    let repo_ref = &**repo_box_ref;
-
-    // If Repo implements Clone, clone it to get an owned Repo
-    let repo_owned = repo_ref.clone();
-    
-   // Now, convert the owned Repo into SnowbirdRepo
-    let mut snowbird_repo: SnowbirdRepo = repo_owned.into();
+    // Now, convert the owned Repo into SnowbirdRepo
+    let mut snowbird_repo: SnowbirdRepo = repo.into();
 
     snowbird_repo.name = repo_data.name.clone();
 
@@ -118,13 +105,13 @@ async fn create_repo(
 async fn get_snowbird_repos(group: &Group) -> Result<Vec<SnowbirdRepo>, AppError> {
     log_debug!(TAG, "start");
 
-    let repo_ids = group.list_repos();
+    let repo_ids = group.list_repos().await;
     let mut snowbird_repos = Vec::new();
 
     for id in repo_ids {
         log_debug!(TAG, "Repo ID {}", id);
-        let repo = group.get_repo(&id)?;
-        let snowbird_repo = SnowbirdRepo::async_from(repo.as_ref().clone()).await;
+        let repo = group.get_repo(&id).await?;
+        let snowbird_repo = SnowbirdRepo::async_from(repo).await;
         snowbird_repos.push(snowbird_repo);
     }
 
