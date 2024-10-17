@@ -13,7 +13,7 @@ mkdir -p $JNI_DIR
 
 # Make sure we're on the latest all the time
 #
-cargo update save-dweb-backend
+# cargo update save-dweb-backend
 
 # Add this target if we need to support older devices.
 # armv7-linux-androideabi
