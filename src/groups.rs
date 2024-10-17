@@ -99,7 +99,7 @@ async fn join_group_from_url(request_url: web::Json<RequestUrl>) -> AppResult<im
     let backend_group = backend.join_from_url(&request.url).await?;
     log_debug!(TAG, "Joined backend group successfully");
 
-    let mut snowbird_group: SnowbirdGroup = (&backend_group).into();
+    let mut snowbird_group: SnowbirdGroup = (&*backend_group).into();
     log_debug!(TAG, "Converted to SnowbirdGroup");
 
     snowbird_group.fill_name(backend_group.as_ref()).await;

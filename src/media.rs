@@ -1,29 +1,21 @@
 use crate::constants::TAG;
 use crate::error::AppResult;
 use crate::log_info;
-use crate::models::GroupRepoPath;
+use crate::logging::android_log;
+use crate::models::{GroupRepoPath, GroupRepoMediaPath};
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
 use actix_web::{delete, get, post, web, HttpResponse, Responder, Scope};
 use futures::StreamExt;
 use save_dweb_backend::common::DHTEntity;
-use serde::Deserialize;
 use serde_json::json;
 
 pub fn scope() -> Scope {
     web::scope("/media")
         .service(upload_file)
         .service(list_files)
-        .service(
-            web::scope("/{media_id}")
-                .service(delete_file)
-                .service(download_file),
-        )
-}
-
-#[derive(Deserialize)]
-struct MediaQuery {
-    file_name: String,
+        .service(delete_file)
+        .service(download_file)
 }
 
 #[get("")]
@@ -66,15 +58,14 @@ async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder>
     Ok(HttpResponse::Ok().json(files_with_status))
 }
 
-#[get("")]
+#[get("/{file_name}")]
 async fn download_file(
-    path: web::Path<GroupRepoPath>,
-    query: web::Query<MediaQuery>,
+    path: web::Path<GroupRepoMediaPath>
 ) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
-    let file_name = &query.file_name;
+    let file_name = &path_params.file_name;
 
     // Fetch the backend and group
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
@@ -91,7 +82,7 @@ async fn download_file(
     }
 
     // Get the file hash
-    let file_hash = repo.get_file_hash(file_name).await?;
+    let file_hash = repo.get_file_hash(&file_name).await?;
 
     if !group.has_hash(&file_hash).await? {
         group.download_hash_from_peers(&file_hash).await?;
@@ -109,15 +100,14 @@ async fn download_file(
         .body(file_data))
 }
 
-#[delete("")]
+#[delete("/{file_name}")]
 async fn delete_file(
-    path: web::Path<GroupRepoPath>,
-    query: web::Query<MediaQuery>,
+    path: web::Path<GroupRepoMediaPath>,
 ) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
-    let file_name = &query.file_name;
+    let file_name = &path_params.file_name;
 
     // Fetch the backend and group
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
@@ -129,21 +119,22 @@ async fn delete_file(
     let repo = group.get_repo(&repo_crypto_key).await?;
 
     // Delete the file and update the collection
-    let collection_hash = repo.delete_file(file_name).await?;
+    let collection_hash = repo.delete_file(&file_name).await?;
 
     Ok(HttpResponse::Ok().json(collection_hash))
 }
 
-#[post("")]
+#[post("/{file_name}")]
 async fn upload_file(
-    path: web::Path<GroupRepoPath>,
-    query: web::Query<MediaQuery>,
+    path: web::Path<GroupRepoMediaPath>,
     mut body: web::Payload,
 ) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
-    let file_name = &query.file_name;
+    let file_name = &path_params.file_name;
+
+    println!("Uploading file: {}", file_name);
 
     // Fetch the backend and group with proper error handling
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)
@@ -183,7 +174,7 @@ async fn upload_file(
 
     // Upload the file
     let file_hash = repo
-        .upload(file_name, file_data)
+        .upload(&file_name, file_data)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
 
@@ -191,7 +182,7 @@ async fn upload_file(
 
     // After uploading, update the DHT with the new file’s hash
     let updated_collection_hash = repo
-        .set_file_and_update_dht(&repo.get_name().await?, file_name, &file_hash)
+        .set_file_and_update_dht(&repo.get_name().await?, &file_name, &file_hash)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to update DHT: {}", e))?;
 
