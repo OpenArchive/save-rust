@@ -4,6 +4,7 @@
 pub mod android_bridge;
 #[cfg(target_os = "android")]
 pub mod jni_globals;
+
 #[cfg(target_os = "android")]
 pub mod status_updater;
 

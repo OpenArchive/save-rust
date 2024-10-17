@@ -11,12 +11,15 @@ pub mod server {
     use anyhow::{anyhow, Context, Result};
     use base64_url;
     use futures::{future, lock};
+    use num_cpus;
     use once_cell::sync::OnceCell;
     use save_dweb_backend::backend::Backend;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
+    use std::cmp;
     use std::fs;
     use std::net::Ipv4Addr;
+    use std::time::{Duration, Instant};
     use std::path::Path;
     use std::sync::Arc;
     use std::{env, panic};
@@ -27,7 +30,7 @@ pub mod server {
         VALID_CRYPTO_KINDS,
     };
     use crate::actix_route_dumper::RouteDumper;
-
+    use crate::models::SnowbirdGroup;
 
     #[derive(Error, Debug)]
     pub enum BackendError {
@@ -62,20 +65,47 @@ pub mod server {
         }))
     }
 
+    #[derive(Deserialize)]
+    struct JoinGroupRequest {
+        uri: String
+    }
+
+    #[post("memberships")]
+    async fn join_group(body: web::Json<JoinGroupRequest>) -> AppResult<impl Responder> {
+        let join_request_data = body.into_inner();
+        let backend = get_backend().await?;
+        let boxed_group = backend.join_from_url(&join_request_data.uri).await?;
+        let snowbird_group: SnowbirdGroup = boxed_group.as_ref().into();
+
+        Ok(HttpResponse::Ok().json(json!({ "group" : snowbird_group })))
+    }
 
     fn actix_log(message: &str) {
         log_debug!(TAG, "Actix log: {}", message);
     }
 
-    pub async fn start(
-        backend_base_directory: &str,
-        server_socket_path: &str,
-    ) -> anyhow::Result<()> {
-        log_debug!(
-            TAG,
-            "start_server: Using socket path: {:?}",
-            server_socket_path
-        );
+    fn log_perf(message: &str, duration: Duration) {
+        let total_ms = duration.as_millis();
+        let rounded_tenths = (total_ms as f64 / 100.0).round() / 10.0;
+        log_info!(TAG, "{} after {:.1} s", message, rounded_tenths);
+    }
+
+    fn get_optimal_worker_count() -> usize {
+        let cpu_count = num_cpus::get();
+        let worker_count = cmp::max(1, cmp::min(cpu_count / 2, 4));
+        
+        log_debug!(TAG, "Detected {} CPUs, using {} workers", cpu_count, worker_count);
+
+        worker_count
+    }
+
+    pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> anyhow::Result<()> {
+        log_debug!(TAG, "start_server: Using socket path: {:?}", server_socket_path);
+
+        let worker_count = get_optimal_worker_count();
+
+        let start_instant = Instant::now();
+        log_info!(TAG, "Starting server initialization...");
 
         let lan_address = Ipv4Addr::UNSPECIFIED; // 0.0.0.0
         let lan_port = 8080;
@@ -98,25 +128,33 @@ pub mod server {
             backend.start().await.context("Backend failed to start");
         }
 
-        log_info!(TAG, "Backend started");
+        log_perf("Backend started", start_instant.elapsed());
 
         let web_server = HttpServer::new(move || {
-            App::new()
+            let app_start = Instant::now();
+            let app = App::new()
             .wrap(RouteDumper::new(actix_log))
             .service(status)
             .service(
                 web::scope("/api")
+                    .service(join_group)
                     .service(groups::scope())
-            )
+            );
+            log_perf("Web server app created", app_start.elapsed());
+            app
         })
         .bind_uds(server_socket_path)?
         .bind((lan_address, lan_port))?
         .disable_signals()
-        .run();
+        .workers(worker_count);
 
-        log_info!(TAG, "Web server started");
+        log_perf("Web server initialized", start_instant.elapsed());
+        log_info!(TAG, "Starting web server...");
+    
+        let server_future = web_server.run();
+        log_perf("Web server started", start_instant.elapsed());
 
-        web_server.await.context("Failed to start server")
+        server_future.await.context("Failed to start server")
     }
 
     pub async fn stop() -> anyhow::Result<()> {

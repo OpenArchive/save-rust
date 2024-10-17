@@ -1,14 +1,14 @@
-use crate::constants::TAG;
+use actix_web::{web, delete, get, post, Responder, HttpResponse};
+use save_dweb_backend::common::DHTEntity;
+use serde_json::json;
 use crate::error::AppResult;
 use crate::log_debug;
 use crate::models::IntoSnowbirdGroupsWithNames;
 use crate::models::{RequestName, SnowbirdGroup, RequestUrl};
 use crate::repos;
+use crate::constants::TAG;
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
-use actix_web::{get, post, web, HttpResponse, Responder};
-use save_dweb_backend::common::DHTEntity;
-use serde_json::json;
 
 pub fn scope() -> actix_web::Scope {
     web::scope("/groups")
@@ -17,9 +17,21 @@ pub fn scope() -> actix_web::Scope {
         .service(join_group_from_url)
         .service(
             web::scope("/{group_id}")
+                .service(delete_group)
                 .service(get_group)
-                .service(repos::scope()),
+                .service(repos::scope())
         )
+}
+
+#[delete("")]
+async fn delete_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
+    let backend = get_backend().await?;
+    let group_id = group_id.into_inner();
+    let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
+    
+    backend.close_group(crypto_key).await?;
+
+    Ok(HttpResponse::Ok().json(json!({})))
 }
 
 #[get("")]
@@ -95,18 +107,3 @@ async fn join_group_from_url(request_url: web::Json<RequestUrl>) -> AppResult<im
 
     Ok(HttpResponse::Ok().json(snowbird_group))
 }
-// Later
-// #[patch("/{group_id}")]
-// async fn update_group(path: web::Path<String>) -> AppResult<impl Responder> {
-//     let backend = get_backend().await?;
-
-//     let group_id = path.into_inner();
-
-//     // let group = backend.get_group(con).await?;
-
-//     // group.set_name("foo").await.expect(dweb::UNABLE_TO_SET_GROUP_NAME);
-
-//     Ok(HttpResponse::Ok().json(json!({
-//         "name": "My Group"
-//     })))
-// }

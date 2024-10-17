@@ -9,7 +9,7 @@ async fn main() -> Result<()> {
     mac::run().await
 }
 
-#[cfg(target_os = "android")]
+#[cfg(not(target_os = "macos"))]
 fn main() {
     // This function will never be called on Android,
     // but it's needed to satisfy the Rust compiler
