@@ -1,10 +1,11 @@
 use crate::constants::TAG;
 use crate::error::AppResult;
-use crate::log_info;
 use crate::logging::android_log;
-use crate::models::{GroupRepoPath, GroupRepoMediaPath};
+use crate::models::{GroupRepoMediaPath, GroupRepoPath};
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
+use crate::{log_debug, log_info};
+use actix_web::web::Bytes;
 use actix_web::{delete, get, post, web, HttpResponse, Responder, Scope};
 use futures::StreamExt;
 use save_dweb_backend::common::DHTEntity;
@@ -59,9 +60,7 @@ async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder>
 }
 
 #[get("/{file_name}")]
-async fn download_file(
-    path: web::Path<GroupRepoMediaPath>
-) -> AppResult<impl Responder> {
+async fn download_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
@@ -76,34 +75,35 @@ async fn download_file(
     let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
     let repo = group.get_repo(&repo_crypto_key).await?;
 
-    let collection_hash = repo.get_hash_from_dht().await?;
-    if !group.has_hash(&collection_hash).await? {
-        group.download_hash_from_peers(&collection_hash).await?;
+    if !repo.can_write() {
+        let collection_hash = repo.get_hash_from_dht().await?;
+        if !group.has_hash(&collection_hash).await? {
+            group.download_hash_from_peers(&collection_hash).await?;
+        }
     }
 
     // Get the file hash
     let file_hash = repo.get_file_hash(&file_name).await?;
 
-    if !group.has_hash(&file_hash).await? {
-        group.download_hash_from_peers(&file_hash).await?;
+    if !repo.can_write() {
+        if !group.has_hash(&file_hash).await? {
+            group.download_hash_from_peers(&file_hash).await?;
+        }
     }
-
     // Trigger file download from peers using the hash
-    let file_data = group
-        .download_hash_from_peers(&file_hash)
+    let file_data = repo
+        .get_file_stream(file_name)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to download file from peers: {}", e))?;
 
     // Return the file data as a binary response
     Ok(HttpResponse::Ok()
         .content_type("application/octet-stream")
-        .body(file_data))
+        .streaming(file_data))
 }
 
 #[delete("/{file_name}")]
-async fn delete_file(
-    path: web::Path<GroupRepoMediaPath>,
-) -> AppResult<impl Responder> {
+async fn delete_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
@@ -133,8 +133,6 @@ async fn upload_file(
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
     let file_name = &path_params.file_name;
-
-    println!("Uploading file: {}", file_name);
 
     // Fetch the backend and group with proper error handling
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)
@@ -170,24 +168,13 @@ async fn upload_file(
         return Err(anyhow::anyhow!("File content is empty").into());
     }
 
-    log_info!(TAG, "Uploading file: {}", file_name);
-
     // Upload the file
-    let file_hash = repo
+    let updated_collection_hash = repo
         .upload(&file_name, file_data)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
 
-    log_info!(TAG, "Updating DHT with hash: {}", file_hash);
-
-    // After uploading, update the DHT with the new file’s hash
-    let updated_collection_hash = repo
-        .set_file_and_update_dht(&repo.get_name().await?, &file_name, &file_hash)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to update DHT: {}", e))?;
-
     Ok(HttpResponse::Ok().json(json!({
-        "file_hash": file_hash,
         "updated_collection_hash": updated_collection_hash,
     })))
 }
