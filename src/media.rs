@@ -67,7 +67,7 @@ async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder>
     Ok(HttpResponse::Ok().json(files_with_status))
 }
 
-#[get("")]
+#[get("/download")]
 async fn download_file(
     path: web::Path<GroupRepoPath>,
     query: web::Query<MediaQuery>,
