@@ -16,6 +16,13 @@ pub struct GroupRepoPath {
     pub repo_id: String,
 }
 
+#[derive(Deserialize)]
+pub struct GroupRepoMediaPath {
+    pub group_id: String,
+    pub repo_id: String,
+    pub file_name: String, 
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RequestName {
     pub name: String,
