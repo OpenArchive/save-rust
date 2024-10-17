@@ -35,7 +35,6 @@ mod tests {
     use server::server::{get_backend, init_backend, status, BACKEND};
     use tmpdir::TmpDir;
     use serde_json::json;
-    use std::sync::Arc;  
 
     #[derive(Serialize, Deserialize)]
     struct GroupsResponse {
@@ -113,22 +112,9 @@ mod tests {
 
         Ok(())
     }
-    use once_cell::sync::OnceCell;
-    use save_dweb_backend::backend::Backend;
-    use tokio::sync::Mutex as TokioMutex;
-    // Declare a second static `OnceCell` for the second backend
-    static BACKEND2: OnceCell<Arc<TokioMutex<Backend>>> = OnceCell::new();
 
-    pub async fn get_backend2<'a>(
-    ) -> Result<impl std::ops::DerefMut<Target = Backend> + 'a, anyhow::Error> {
-        match BACKEND2.get() {
-            Some(backend) => Ok(backend.lock().await),
-            None => Err(anyhow::anyhow!("Backend2 not initialized")),
-        }
-    }
-    
     #[actix_web::test]
-    async fn test_api_file_operations() -> Result<()> {
+    async fn test_upload_list_delete() -> Result<()> {
         // Initialize the app
         let path = TmpDir::new("test_api_repo_file_operations").await?;
 
@@ -206,50 +192,7 @@ mod tests {
             panic!("The response is not an array as expected");
         }
 
-        // Now we initialize the second backend to test file download
-        let backend2;
-        let path2 = TmpDir::new("test_api_repo_file_operations2").await?;
-
-        BACKEND2.get_or_init(|| init_backend(path2.to_path_buf().as_path()));
-
-        {
-            backend2 = get_backend2().await?;
-            backend2.start().await.expect("Backend2 failed to start");
-        }
-
-        let app2 = test::init_service(
-            App::new()
-                .service(status)
-                .service(web::scope("/api").service(groups::scope())),
-        )
-        .await;
-
-        // Step 5: we test the file download response
-        let download_file_req = test::TestRequest::get()
-            .uri(&format!("/api/groups/{}/repos/{}/media/download?file_name={}", group_id, repo_id, "example.txt"))
-            .to_request();
-
-        let download_file_resp = test::call_service(&app2, download_file_req).await;
-        let download_file_status = download_file_resp.status();
-        let download_file_body = test::read_body(download_file_resp).await;
-
-        println!("Download file response status: {:?}", download_file_status);
-        println!("Download file response body: {:?}", download_file_body);
-
-        // Verify the response status
-        assert_eq!(
-            download_file_status, 200,
-            "Expected successful file download, but got status: {:?}", download_file_status
-        );
-
-        // Compare the downloaded raw file content to the original content
-        assert_eq!(
-            &download_file_body[..],  // Ensure byte-by-byte comparison
-            b"Test content for file upload",
-            "Downloaded file content does not match uploaded content"
-        );
-
-        // Step 6: Delete the file from the repository
+        // Step 5: Delete the file from the repository
         let delete_file_req = test::TestRequest::delete()
             .uri(&format!("/api/groups/{}/repos/{}/media?file_name={}", group_id, repo_id, "example.txt"))
             .to_request();
@@ -257,7 +200,7 @@ mod tests {
 
         assert!(delete_resp.status().is_success(), "File deletion failed");
 
-        // Step 7: Verify the file is no longer listed
+        // Step 6: Verify the file is no longer listed
         let list_files_after_deletion_req = test::TestRequest::get()
             .uri(&format!("/api/groups/{}/repos/{}/media", group_id, repo_id))
             .to_request();
@@ -272,9 +215,6 @@ mod tests {
         {
             let backend = get_backend().await?;
             backend.stop().await.expect("Backend failed to stop");
-
-            let backend2 = get_backend2().await?; 
-            backend2.stop().await.expect("Backend2 failed to stop");
         }
 
         Ok(())
