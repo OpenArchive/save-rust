@@ -147,3 +147,8 @@ impl IntoSnowbirdRepos for Vec<Repo> {
         self.iter().map(SnowbirdRepo::from).collect()
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct RequestUrl {
+    pub url: String,
+}

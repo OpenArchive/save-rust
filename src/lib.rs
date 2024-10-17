@@ -5,6 +5,12 @@ pub mod android_bridge;
 #[cfg(target_os = "android")]
 pub mod jni_globals;
 
+#[cfg(target_os = "android")]
+pub mod status_updater;
+
+#[cfg(target_os = "macos")]
+pub mod mac;
+
 pub mod actix_route_dumper;
 pub mod constants;
 pub mod error;
@@ -27,6 +33,8 @@ mod tests {
     use server::server::{get_backend, init_backend, status, BACKEND};
     use tmpdir::TmpDir;
     use serde_json::json;
+    use crate::media::{download_file, upload_file, scope}; 
+    use crate::models::GroupRepoPath;
 
     #[derive(Serialize, Deserialize)]
     struct GroupsResponse {
@@ -89,6 +97,9 @@ mod tests {
 
         assert_eq!(repo.name, "example repo".to_string());
 
+        // Add a short sleep to ensure the async repo creation has completed
+        tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
+
         let req = test::TestRequest::default()
             .uri(format!("/api/groups/{}/repos", group.key).as_str())
             .to_request();
@@ -104,7 +115,6 @@ mod tests {
 
         Ok(())
     }
-
     #[actix_web::test]
     async fn test_upload_list_delete() -> Result<()> {
         // Initialize the app
@@ -211,5 +221,4 @@ mod tests {
 
         Ok(())
     }
-
 }
