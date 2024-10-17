@@ -2,13 +2,12 @@ use crate::constants::TAG;
 use crate::error::AppResult;
 use crate::log_info;
 use crate::logging::android_log;
-use crate::models::GroupRepoPath;
+use crate::models::{GroupRepoPath, GroupRepoMediaPath};
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
 use actix_web::{delete, get, post, web, HttpResponse, Responder, Scope};
 use futures::StreamExt;
 use save_dweb_backend::common::DHTEntity;
-use serde::Deserialize;
 use serde_json::json;
 
 pub fn scope() -> Scope {
@@ -17,11 +16,6 @@ pub fn scope() -> Scope {
         .service(list_files)
         .service(delete_file)
         .service(download_file)
-}
-
-#[derive(Deserialize)]
-struct MediaQuery {
-    file_name: String,
 }
 
 #[get("")]
