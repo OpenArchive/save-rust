@@ -97,9 +97,6 @@ mod tests {
 
         assert_eq!(repo.name, "example repo".to_string());
 
-        // Add a short sleep to ensure the async repo creation has completed
-        tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
-
         let req = test::TestRequest::default()
             .uri(format!("/api/groups/{}/repos", group.key).as_str())
             .to_request();
