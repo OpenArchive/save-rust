@@ -15,11 +15,8 @@ pub fn scope() -> Scope {
     web::scope("/media")
         .service(upload_file)
         .service(list_files)
-        .service(
-            web::scope("/{media_id}")
-                .service(delete_file)
-                .service(download_file),
-        )
+        .service(delete_file)
+        .service(download_file)
 }
 
 #[derive(Deserialize)]
