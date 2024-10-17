@@ -1,19 +1,20 @@
 use actix_web::{web, delete, get, post, Responder, HttpResponse};
 use save_dweb_backend::common::DHTEntity;
 use serde_json::json;
-use crate::models::{RequestName, SnowbirdGroup};
 use crate::error::AppResult;
 use crate::log_debug;
+use crate::models::IntoSnowbirdGroupsWithNames;
+use crate::models::{RequestName, SnowbirdGroup, RequestUrl};
 use crate::repos;
 use crate::constants::TAG;
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
-use crate::models::IntoSnowbirdGroupsWithNames;
 
 pub fn scope() -> actix_web::Scope {
     web::scope("/groups")
         .service(get_groups)
         .service(create_group)
+        .service(join_group_from_url)
         .service(
             web::scope("/{group_id}")
                 .service(delete_group)
@@ -82,6 +83,27 @@ async fn create_group(request_name: web::Json<RequestName>) -> AppResult<impl Re
     log_debug!(TAG, "got snowbird group");
 
     snowbird_group.name = Some(request.name);
+
+    Ok(HttpResponse::Ok().json(snowbird_group))
+}
+
+#[post("/join_from_url")]
+async fn join_group_from_url(request_url: web::Json<RequestUrl>) -> AppResult<impl Responder> {
+    let request = request_url.into_inner();
+
+    log_debug!(TAG, "Received request with URL: {:?}", request.url);
+
+    let backend = get_backend().await?;
+    log_debug!(TAG, "Obtained backend instance");
+
+    let backend_group = backend.join_from_url(&request.url).await?;
+    log_debug!(TAG, "Joined backend group successfully");
+
+    let mut snowbird_group: SnowbirdGroup = (&backend_group).into();
+    log_debug!(TAG, "Converted to SnowbirdGroup");
+
+    snowbird_group.fill_name(backend_group.as_ref()).await;
+    log_debug!(TAG, "Filled group name");
 
     Ok(HttpResponse::Ok().json(snowbird_group))
 }
