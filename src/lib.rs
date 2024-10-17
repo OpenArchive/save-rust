@@ -192,6 +192,15 @@ mod tests {
             panic!("The response is not an array as expected");
         }
 
+        // This fails -> Try to download the file from backend
+        let download_req = test::TestRequest::get()
+        .uri(&format!("/api/groups/{}/repos/{}/media/download?file_name={}", group_id, repo_id, "example.txt"))
+        .to_request();
+        let download_resp = test::call_service(&app, download_req).await;
+
+       // Check if the file was successfully downloaded
+       assert!(download_resp.status().is_success(), "File download failed");
+
         // Step 5: Delete the file from the repository
         let delete_file_req = test::TestRequest::delete()
             .uri(&format!("/api/groups/{}/repos/{}/media?file_name={}", group_id, repo_id, "example.txt"))
