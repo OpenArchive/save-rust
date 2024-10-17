@@ -154,7 +154,7 @@ mod tests {
         let file_content = b"Test content for file upload";
 
         let upload_req = test::TestRequest::post()
-            .uri(&format!("/api/groups/{}/repos/{}/media?file_name={}", group_id, repo_id, file_name))
+            .uri(&format!("/api/groups/{}/repos/{}/media/{}", group_id, repo_id, file_name))
             .set_payload(file_content.to_vec())
             .to_request();
         let upload_resp = test::call_service(&app, upload_req).await;
@@ -194,7 +194,7 @@ mod tests {
 
         // Step 5: Delete the file from the repository
         let delete_file_req = test::TestRequest::delete()
-            .uri(&format!("/api/groups/{}/repos/{}/media?file_name={}", group_id, repo_id, "example.txt"))
+            .uri(&format!("/api/groups/{}/repos/{}/media/{}", group_id, repo_id, "example.txt"))
             .to_request();
         let delete_resp = test::call_service(&app, delete_file_req).await;
 
