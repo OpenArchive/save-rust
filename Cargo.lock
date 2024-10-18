@@ -5211,7 +5211,7 @@ dependencies = [
 [[package]]
 name = "save-dweb-backend"
 version = "0.1.0"
-source = "git+https://github.com/OpenArchive/save-dweb-backend?branch=main#b4b6d567875c113bfaa0d5d8b646c090f986f157"
+source = "git+https://github.com/OpenArchive/save-dweb-backend?branch=main#950b8a589a2668824308ee5d1408445d216e5b14"
 dependencies = [
  "anyhow",
  "async-stream",
