@@ -158,7 +158,7 @@ impl IntoSnowbirdRepos for Vec<Repo> {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RequestUrl {
     pub url: String,
 }

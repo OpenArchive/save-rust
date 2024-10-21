@@ -20,11 +20,10 @@ pub mod utils;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::media::{download_file, scope, upload_file};
-    use crate::models::GroupRepoPath;
     use actix_web::{test, web, App};
     use anyhow::Result;
-    use models::{RequestName, SnowbirdFile, SnowbirdGroup, SnowbirdRepo};
+    use models::{RequestName, RequestUrl, SnowbirdFile, SnowbirdGroup, SnowbirdRepo};
+    use save_dweb_backend::{common::DHTEntity, constants::TEST_GROUP_NAME};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use server::server::{get_backend, init_backend, status, BACKEND};
@@ -233,6 +232,164 @@ mod tests {
             let backend = get_backend().await?;
             backend.stop().await.expect("Backend failed to stop");
         }
+
+        Ok(())
+    }
+
+    #[actix_web::test]
+    async fn test_join_group() -> Result<()> {
+        // Initialize the app
+        let path = TmpDir::new("test_api_repo_file_operations").await?;
+
+        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
+        {
+            let backend = get_backend().await?;
+            backend.start().await.expect("Backend failed to start");
+        }
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        let store2 = iroh_blobs::store::fs::Store::load(path.to_path_buf().join("iroh2")).await?;
+        let (veilid_api2, update_rx2) = save_dweb_backend::common::init_veilid(
+            path.to_path_buf().join("test2").as_path(),
+            "test2".to_string(),
+        )
+        .await?;
+        let backend2 = save_dweb_backend::backend::Backend::from_dependencies(
+            &path.to_path_buf(),
+            veilid_api2.clone(),
+            update_rx2,
+            store2,
+        )
+        .await
+        .unwrap();
+
+        let mut group = backend2.create_group().await?;
+
+        group.set_name(TEST_GROUP_NAME).await?;
+
+        let repo = group.create_repo().await?;
+        repo.set_name(TEST_GROUP_NAME).await?;
+
+        // Step 1: Create a group via the API
+        let join_group_req = test::TestRequest::post()
+            .uri("/api/groups/join_from_url")
+            .set_json(RequestUrl {
+                url: group.get_url(),
+            })
+            .to_request();
+        let join_group_resp = test::call_service(&app, join_group_req).await;
+
+        assert!(join_group_resp.status().is_success());
+
+        let joined_group: SnowbirdGroup = test::read_body_json(join_group_resp).await;
+
+        assert_eq!(
+            joined_group.name,
+            Some(TEST_GROUP_NAME.to_string()),
+            "Joined group has expected name"
+        );
+
+        let groups_req = test::TestRequest::default().uri("/api/groups").to_request();
+        let groups_resp = test::call_service(&app, groups_req).await;
+
+        assert!(groups_resp.status().is_success(), "Group join successful");
+
+        let groups: GroupsResponse = test::read_body_json(groups_resp).await;
+
+        assert_eq!(groups.groups.len(), 1);
+
+        let req = test::TestRequest::default()
+            .uri(format!("/api/groups/{}/repos", joined_group.key).as_str())
+            .to_request();
+        let resp: ReposResponse = test::call_and_read_body_json(&app, req).await;
+
+        assert_eq!(resp.repos.len(), 1, "Should have 1 repo after joining");
+
+        backend2.stop().await?;
+        {
+            let backend = get_backend().await?;
+            backend.stop().await.expect("Backend failed to stop");
+        }
+
+        Ok(())
+    }
+
+    #[actix_web::test]
+    async fn test_replicate_group() -> Result<()> {
+        // Initialize the app
+        let path = TmpDir::new("test_api_repo_file_operations").await?;
+
+        let store2 = iroh_blobs::store::fs::Store::load(path.to_path_buf().join("iroh2")).await?;
+        let (veilid_api2, update_rx2) = save_dweb_backend::common::init_veilid(
+            path.to_path_buf().join("test2").as_path(),
+            "test2".to_string(),
+        )
+        .await?;
+        let backend2 = save_dweb_backend::backend::Backend::from_dependencies(
+            &path.to_path_buf(),
+            veilid_api2.clone(),
+            update_rx2,
+            store2,
+        )
+        .await
+        .unwrap();
+
+        let mut group = backend2.create_group().await?;
+
+        let join_url = group.get_url();
+
+        group.set_name(TEST_GROUP_NAME).await?;
+
+        let repo = group.create_repo().await?;
+        repo.set_name(TEST_GROUP_NAME).await?;
+
+        // Step 3: Upload a file to the repository
+        let file_name = "example.txt";
+        let file_content = b"Test content for file upload";
+
+        repo.upload(&file_name, file_content.to_vec()).await?;
+
+        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
+        {
+            let backend = get_backend().await?;
+            backend.start().await.expect("Backend failed to start");
+        }
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        {
+            let backend = get_backend().await?;
+            backend.join_from_url(join_url.as_str()).await?;
+        }
+
+        let get_file_req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/groups/{}/repos/{}/media/{}",
+                group.id().to_string(),
+                repo.id().to_string(),
+                file_name
+            ))
+            .to_request();
+        let get_file_resp = test::call_service(&app, get_file_req).await;
+        assert!(get_file_resp.status().is_success(), "File download failed");
+
+        let got_file_data = test::read_body(get_file_resp).await;
+        assert_eq!(
+            got_file_data.to_vec().as_slice(),
+            file_content,
+            "Downloaded back file content"
+        );
 
         Ok(())
     }
