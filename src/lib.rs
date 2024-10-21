@@ -24,20 +24,25 @@ mod tests {
     use crate::models::GroupRepoPath;
     use actix_web::{test, web, App};
     use anyhow::Result;
-    use models::{RequestName, SnowbirdGroup, SnowbirdRepo};
+    use models::{RequestName, SnowbirdFile, SnowbirdGroup, SnowbirdRepo};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use server::server::{get_backend, init_backend, status, BACKEND};
     use tmpdir::TmpDir;
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     struct GroupsResponse {
         groups: Vec<SnowbirdGroup>,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     struct ReposResponse {
         repos: Vec<SnowbirdRepo>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct FilesResponse {
+        files: Vec<SnowbirdFile>,
     }
 
     #[actix_web::test]
@@ -168,28 +173,21 @@ mod tests {
         let list_files_req = test::TestRequest::get()
             .uri(&format!("/api/groups/{}/repos/{}/media", group_id, repo_id))
             .to_request();
-        let list_files_resp: serde_json::Value =
+        let list_files_resp: FilesResponse =
             test::call_and_read_body_json(&app, list_files_req).await;
 
         println!("List files response: {:?}", list_files_resp);
 
         // Now check if the response is an array directly
-        if let Some(files_array) = list_files_resp.as_array() {
-            assert_eq!(files_array.len(), 1, "There should be one file in the repo");
+        let files_array = list_files_resp.files;
+        assert_eq!(files_array.len(), 1, "There should be one file in the repo");
 
-            // Ensure the file name matches what we uploaded
-            let file_obj = &files_array[0];
-            assert_eq!(
-                file_obj["name"].as_str().unwrap(),
-                "example.txt",
-                "The listed file should match the uploaded file"
-            );
-
-            let file_name = file_obj["name"].as_str().expect("File name not found");
-            assert_eq!(file_name, "example.txt", "File name does not match");
-        } else {
-            panic!("The response is not an array as expected");
-        }
+        // Ensure the file name matches what we uploaded
+        let file_obj = &files_array[0];
+        assert_eq!(
+            file_obj.name, "example.txt",
+            "The listed file should match the uploaded file"
+        );
 
         let get_file_req = test::TestRequest::get()
             .uri(&format!(
@@ -222,14 +220,11 @@ mod tests {
         let list_files_after_deletion_req = test::TestRequest::get()
             .uri(&format!("/api/groups/{}/repos/{}/media", group_id, repo_id))
             .to_request();
-        let list_files_after_deletion_resp: serde_json::Value =
+        let list_files_after_deletion_resp: FilesResponse =
             test::call_and_read_body_json(&app, list_files_after_deletion_req).await;
 
         assert!(
-            list_files_after_deletion_resp
-                .as_array()
-                .unwrap()
-                .is_empty(),
+            list_files_after_deletion_resp.files.is_empty(),
             "File list should be empty after file deletion"
         );
 

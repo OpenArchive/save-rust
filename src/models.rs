@@ -1,4 +1,5 @@
 use futures::future::BoxFuture;
+use iroh_blobs::Hash;
 use save_dweb_backend::common::DHTEntity;
 use save_dweb_backend::group::Group;
 use save_dweb_backend::repo::Repo;
@@ -20,7 +21,7 @@ pub struct GroupRepoPath {
 pub struct GroupRepoMediaPath {
     pub group_id: String,
     pub repo_id: String,
-    pub file_name: String, 
+    pub file_name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,6 +33,12 @@ impl fmt::Display for RequestName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "RequestName {{ name: {} }}", self.name)
     }
+}
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SnowbirdFile {
+    pub name: String,
+    pub hash: Hash,
+    pub is_downloaded: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -96,7 +103,7 @@ impl IntoSnowbirdGroupsWithNames for Vec<Box<Group>> {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SnowbirdRepo {
     pub key: String,
-    pub name: String
+    pub name: String,
 }
 
 #[async_trait::async_trait]
@@ -109,7 +116,10 @@ impl AsyncFrom<Repo> for SnowbirdRepo {
     async fn async_from(repo: Repo) -> Self {
         SnowbirdRepo {
             key: repo.id().to_string(),
-            name: repo.get_name().await.unwrap_or_else(|_| "Unknown".to_string()),
+            name: repo
+                .get_name()
+                .await
+                .unwrap_or_else(|_| "Unknown".to_string()),
         }
     }
 }
@@ -118,7 +128,7 @@ impl From<&Repo> for SnowbirdRepo {
     fn from(repo: &Repo) -> Self {
         SnowbirdRepo {
             key: repo.id().to_string(),
-            name: "".to_string()
+            name: "".to_string(),
         }
     }
 }
@@ -127,7 +137,7 @@ impl From<Repo> for SnowbirdRepo {
     fn from(repo: Repo) -> Self {
         SnowbirdRepo {
             key: repo.id().to_string(),
-            name: "".to_string()
+            name: "".to_string(),
         }
     }
 }
