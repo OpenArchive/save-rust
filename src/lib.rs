@@ -174,7 +174,7 @@ mod tests {
         println!("List files response: {:?}", list_files_resp);
 
         // Now check if the response is an array directly
-        if let Some(files_array) = list_files_resp.as_array() {
+        if let Some(files_array) = list_files_resp.get("files").and_then(|v| v.as_array()) {
             assert_eq!(files_array.len(), 1, "There should be one file in the repo");
 
             // Ensure the file name matches what we uploaded
@@ -225,13 +225,14 @@ mod tests {
         let list_files_after_deletion_resp: serde_json::Value =
             test::call_and_read_body_json(&app, list_files_after_deletion_req).await;
 
-        assert!(
-            list_files_after_deletion_resp
-                .as_array()
-                .unwrap()
-                .is_empty(),
-            "File list should be empty after file deletion"
-        );
+        if let Some(files_array) = list_files_after_deletion_resp.get("files").and_then(|v| v.as_array()) {
+            assert!(
+                files_array.is_empty(),
+                "File list should be empty after file deletion"
+            );
+        } else {
+            panic!("The response does not contain the 'files' array as expected");
+        }
 
         // Clean up: Stop the backend
         {
