@@ -1,15 +1,15 @@
 use crate::constants::TAG;
-use crate::error::AppResult;
-use crate::logging::android_log;
+use crate::error::{AppError, AppResult};
 use crate::models::{GroupRepoMediaPath, GroupRepoPath};
 use crate::server::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
-use crate::{log_debug, log_info};
-use actix_web::web::Bytes;
-use actix_web::{delete, get, post, web, HttpResponse, Responder, Scope};
+use crate::log_info;
+use actix_web::{delete, get, post, web, HttpResponse, Responder, Scope, http::header, error::BlockingError};
+use bytes::{BytesMut, Bytes};
+use futures::Stream;
 use futures::StreamExt;
-use save_dweb_backend::common::DHTEntity;
 use serde_json::json;
+use std::io;
 
 pub fn scope() -> Scope {
     web::scope("/media")
@@ -17,6 +17,27 @@ pub fn scope() -> Scope {
         .service(list_files)
         .service(delete_file)
         .service(download_file)
+}
+
+pub fn from_blocking<T>(result: Result<T, BlockingError>) -> AppResult<T> {
+    result.map_err(AppError::from)
+}
+
+async fn handle_file_stream(mut file_data: impl Stream<Item = Result<Bytes, io::Error>> + Unpin) -> AppResult<(usize, Bytes)> {
+    let mut buffer = BytesMut::new();
+    let mut length = 0;
+
+    while let Some(chunk_result) = file_data.next().await {
+        let chunk = chunk_result.map_err(|e| AppError(anyhow::Error::new(e)))?;
+        buffer.extend_from_slice(&chunk);
+        length += chunk.len();
+    }
+
+    let final_buffer = web::block(move || {
+        buffer.freeze()
+    }).await?;
+
+    Ok((length, final_buffer))
 }
 
 #[get("")]
@@ -55,8 +76,7 @@ async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder>
             "is_downloaded": is_downloaded
         }));
     }
-
-    Ok(HttpResponse::Ok().json(files_with_status))
+    Ok(HttpResponse::Ok().json(json!({ "files": files_with_status })))
 }
 
 #[get("/{file_name}")]
@@ -93,13 +113,14 @@ async fn download_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<impl Re
     // Trigger file download from peers using the hash
     let file_data = repo
         .get_file_stream(file_name)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to download file from peers: {}", e))?;
+        .await?;
 
-    // Return the file data as a binary response
+    let (content_length, buffered_data) = handle_file_stream(file_data).await?;
+
     Ok(HttpResponse::Ok()
         .content_type("application/octet-stream")
-        .streaming(file_data))
+        .insert_header((header::CONTENT_LENGTH, content_length))
+        .body(buffered_data))
 }
 
 #[delete("/{file_name}")]
@@ -175,6 +196,7 @@ async fn upload_file(
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
 
     Ok(HttpResponse::Ok().json(json!({
+        "name": file_name,
         "updated_collection_hash": updated_collection_hash,
     })))
 }

@@ -1,4 +1,6 @@
+#[cfg(target_os = "android")]
 use std::ffi::CString;
+
 #[cfg(target_os = "android")]
 use std::os::raw::{c_char, c_int};
 

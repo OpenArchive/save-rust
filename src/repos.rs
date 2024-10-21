@@ -103,17 +103,28 @@ async fn create_repo(
 }
 
 async fn get_snowbird_repos(group: &Group) -> Result<Vec<SnowbirdRepo>, AppError> {
-    log_debug!(TAG, "start");
+    log_debug!(TAG, "Getting Snowbird Repos");
 
-    let repo_ids = group.list_repos().await;
+    let locked_repos = group.repos.lock().await;
+    let repos: Vec<_> = locked_repos.values().cloned().collect();
+
     let mut snowbird_repos = Vec::new();
 
-    for id in repo_ids {
-        log_debug!(TAG, "Repo ID {}", id);
-        let repo = group.get_repo(&id).await?;
+    for repo in repos {
+        log_debug!(TAG, "Repo ID {}", repo.id());
         let snowbird_repo = SnowbirdRepo::async_from(repo).await;
         snowbird_repos.push(snowbird_repo);
     }
+
+    // let repo_ids = group.list_repos().await;
+    // let mut snowbird_repos = Vec::new();
+
+    // for id in repo_ids {
+    //     log_debug!(TAG, "Repo ID {}", id);
+    //     let repo = group.get_repo(&id).await?;
+    //     let snowbird_repo = SnowbirdRepo::async_from(repo).await;
+    //     snowbird_repos.push(snowbird_repo);
+    // }
 
     Ok(snowbird_repos)
 }

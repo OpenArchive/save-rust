@@ -382,9 +382,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.89"
+version = "1.0.90"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86fdf8605db99b54d3cd748a44c6d04df638eb5dafb219b135d0149bd0db01f6"
+checksum = "37bf3594c4c988a53154954629820791dde498571819ae4ca50ca811e060cc95"
 
 [[package]]
 name = "argon2"
@@ -5191,6 +5191,7 @@ dependencies = [
  "async-trait",
  "base64-url",
  "blake3",
+ "bytes",
  "crossbeam-channel",
  "eyre",
  "futures",
@@ -6614,7 +6615,7 @@ dependencies = [
 [[package]]
 name = "veilid-core"
 version = "0.3.4"
-source = "git+https://gitlab.com/veilid/veilid.git?branch=main#36252250146fb6450ccf4f392f3bc2ec2a9eb8e7"
+source = "git+https://gitlab.com/veilid/veilid.git?branch=main#f8c17177f7774aaaece812024c5ad0e946677f2e"
 dependencies = [
  "argon2",
  "async-io",
@@ -6754,7 +6755,7 @@ dependencies = [
 [[package]]
 name = "veilid-tools"
 version = "0.3.4"
-source = "git+https://gitlab.com/veilid/veilid.git?branch=main#36252250146fb6450ccf4f392f3bc2ec2a9eb8e7"
+source = "git+https://gitlab.com/veilid/veilid.git?branch=main#f8c17177f7774aaaece812024c5ad0e946677f2e"
 dependencies = [
  "android_logger 0.13.3",
  "async-lock 3.4.0",

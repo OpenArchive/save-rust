@@ -1,4 +1,4 @@
-use actix_web::{HttpResponse, ResponseError};
+use actix_web::{HttpResponse, ResponseError, error::BlockingError};
 use anyhow::anyhow;
 use anyhow::Error as AnyhowError;
 use base64_url::base64;
@@ -63,6 +63,12 @@ impl From<Vec<u8>> for AppError {
 impl From<ErrReport> for AppError {
     fn from(err: ErrReport) -> Self {
         AppError(anyhow!(err.to_string()))
+    }
+}
+
+impl From<BlockingError> for AppError {
+    fn from(error: BlockingError) -> Self {
+        AppError(AnyhowError::new(error).context("An error occurred during a blocking operation"))
     }
 }
 

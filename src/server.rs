@@ -92,11 +92,14 @@ pub mod server {
 
     fn get_optimal_worker_count() -> usize {
         let cpu_count = num_cpus::get();
-        let worker_count = cmp::max(1, cmp::min(cpu_count / 2, 4));
+        //let worker_count = cmp::max(1, cmp::min(cpu_count / 2, 4));
         
-        log_debug!(TAG, "Detected {} CPUs, using {} workers", cpu_count, worker_count);
+        log_debug!(TAG, "Detected {} CPUs", cpu_count);
 
-        worker_count
+        // This whole thing was an attempt at optimization, but since
+        // we're only ever handling one request at a time let's keep
+        // things lightweight for now.
+        1
     }
 
     pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> anyhow::Result<()> {

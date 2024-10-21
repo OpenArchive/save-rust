@@ -23,6 +23,8 @@ pub fn scope() -> actix_web::Scope {
         )
 }
 
+// This doesn't seem to be the way to delete a group.
+//
 #[delete("")]
 async fn delete_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
     let backend = get_backend().await?;
