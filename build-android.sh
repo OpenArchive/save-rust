@@ -8,7 +8,7 @@ mkdir -p $BUILD_DIR
 cd $BUILD_DIR
 
 # Create the jniLibs build directory
-JNI_DIR=$HOME/Projects/save-android/app/src/main/jniLibs
+JNI_DIR=../../save-android/app/src/main/jniLibs
 mkdir -p $JNI_DIR
 
 # Make sure we're on the latest all the time
