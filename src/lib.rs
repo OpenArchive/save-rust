@@ -19,6 +19,8 @@ pub mod utils;
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use actix_web::{test, web, App};
     use anyhow::Result;
@@ -340,6 +342,12 @@ mod tests {
         .await
         .unwrap();
 
+        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
+        {
+            let backend = get_backend().await?;
+            backend.start().await.expect("Backend failed to start");
+        }
+
         let mut group = backend2.create_group().await?;
 
         let join_url = group.get_url();
@@ -355,11 +363,7 @@ mod tests {
 
         repo.upload(&file_name, file_content.to_vec()).await?;
 
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-        {
-            let backend = get_backend().await?;
-            backend.start().await.expect("Backend failed to start");
-        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
 
         let app = test::init_service(
             App::new()
