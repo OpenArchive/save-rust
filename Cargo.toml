@@ -1,6 +1,6 @@
 [package]
 name = "save"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Richard Puckett <richard@open-archive.org"]
 description = "Decentralized Web for Save"
 edition = "2021"
