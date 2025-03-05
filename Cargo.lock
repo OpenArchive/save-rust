@@ -5462,7 +5462,7 @@ dependencies = [
 
 [[package]]
 name = "save"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -5490,8 +5490,8 @@ dependencies = [
 
 [[package]]
 name = "save-dweb-backend"
-version = "0.1.2"
-source = "git+https://github.com/OpenArchive/save-dweb-backend#edff3f8b6d2edfc5a9b2955fd6206417c6a094e6"
+version = "0.1.3"
+source = "git+https://github.com/OpenArchive/save-dweb-backend#3ef3507ba84f17a85247572fd5f062be673319f2"
 dependencies = [
  "anyhow",
  "async-stream",
