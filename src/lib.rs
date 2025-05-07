@@ -394,6 +394,20 @@ mod tests {
             file_content,
             "Downloaded back file content"
         );
+
+        // Clean up
+        backend2.stop().await?;
+        {
+            let backend = get_backend().await?;
+            backend.stop().await.expect("Backend failed to stop");
+        }
+        // Add delay to allow tasks to complete
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        veilid_api2.shutdown().await;
+
+        Ok(())
+    }
+
     #[actix_web::test]
     async fn test_refresh_endpoint() -> Result<()> {
         // Initialize the app
