@@ -19,6 +19,7 @@ pub fn scope() -> actix_web::Scope {
             web::scope("/{group_id}")
                 .service(delete_group)
                 .service(get_group)
+                .service(refresh_group)
                 .service(repos::scope())
         )
 }
@@ -108,4 +109,58 @@ async fn join_group_from_url(request_url: web::Json<RequestUrl>) -> AppResult<im
     log_debug!(TAG, "Filled group name");
 
     Ok(HttpResponse::Ok().json(snowbird_group))
+}
+
+#[post("/refresh")]
+async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
+    let backend = get_backend().await?;
+    log_debug!(TAG, "Starting group refresh");
+
+    let group_id = group_id.into_inner();
+    let key = create_veilid_cryptokey_from_base64(group_id.as_str())?;
+    log_debug!(TAG, "Got key {}", key);
+
+    let group = backend.get_group(&key).await?;
+    log_debug!(TAG, "Got group");
+
+    // Get all repos in the group
+    let locked_repos = group.repos.lock().await;
+    let repos: Vec<_> = locked_repos.values().cloned().collect();
+    drop(locked_repos); // Release the lock before async operations
+
+    let mut refreshed_files = Vec::new();
+
+    // For each repo, refresh its collection and files
+    for repo in repos {
+        log_debug!(TAG, "Refreshing repo {}", repo.id());
+        
+        // Refresh collection hash
+        let collection_hash = repo.get_hash_from_dht().await?;
+        if !group.has_hash(&collection_hash).await? {
+            group.download_hash_from_peers(&collection_hash).await?;
+            log_debug!(TAG, "Downloaded collection hash {}", collection_hash);
+        }
+
+        // Get and refresh all files
+        let files = repo.list_files().await?;
+        for file_name in files {
+            match repo.get_file_hash(&file_name).await {
+                Ok(file_hash) => {
+                    if !group.has_hash(&file_hash).await? {
+                        group.download_hash_from_peers(&file_hash).await?;
+                        log_debug!(TAG, "Downloaded file hash {} for {}", file_hash, file_name);
+                        refreshed_files.push(file_name);
+                    }
+                }
+                Err(e) => {
+                    log_debug!(TAG, "Error getting hash for file {}: {}", file_name, e);
+                }
+            }
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(json!({
+        "status": "success",
+        "refreshed_files": refreshed_files
+    })))
 }
