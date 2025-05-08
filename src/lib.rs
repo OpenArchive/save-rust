@@ -395,6 +395,236 @@ mod tests {
             "Downloaded back file content"
         );
 
+        // Clean up
+        backend2.stop().await?;
+        {
+            let backend = get_backend().await?;
+            backend.stop().await.expect("Backend failed to stop");
+        }
+        // Add delay to allow tasks to complete
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        veilid_api2.shutdown().await;
+
+        Ok(())
+    }
+
+    #[actix_web::test]
+    async fn test_refresh_endpoint() -> Result<()> {
+        // Initialize the app
+        let path = TmpDir::new("test_api_repo_file_operations").await?;
+
+        // Initialize backend2 first
+        let store2 = iroh_blobs::store::fs::Store::load(path.to_path_buf().join("iroh2")).await?;
+        let (veilid_api2, update_rx2) = save_dweb_backend::common::init_veilid(
+            path.to_path_buf().join("test2").as_path(),
+            "test2".to_string(),
+        )
+        .await?;
+        let backend2 = save_dweb_backend::backend::Backend::from_dependencies(
+            &path.to_path_buf(),
+            veilid_api2.clone(),
+            update_rx2,
+            store2,
+        )
+        .await
+        .unwrap();
+
+        // Initialize the main backend after backend2
+        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
+        {
+            let backend = get_backend().await?;
+            backend.start().await.expect("Backend failed to start");
+        }
+
+        // Create group and repo in backend2
+        let mut group = backend2.create_group().await?;
+        let join_url = group.get_url();
+        group.set_name(TEST_GROUP_NAME).await?;
+
+        let repo = group.create_repo().await?;
+        repo.set_name(TEST_GROUP_NAME).await?;
+
+        // Upload a file
+        let file_name = "example.txt";
+        let file_content = b"Test content for file upload";
+        repo.upload(&file_name, file_content.to_vec()).await?;
+
+        // Give the upload some time to propagate through the network
+        // Simple polling function with backoff
+        async fn poll_until_success(
+            attempts: u32, 
+            base_delay_ms: u64, 
+            max_delay_ms: u64, 
+            check_condition: impl Fn() -> Result<bool>
+        ) -> Result<()> {
+            let mut delay_ms = base_delay_ms;
+            for attempt in 0..attempts {
+                if check_condition()? {
+                    return Ok(());
+                }
+                
+                if attempt < attempts - 1 {
+                    let jitter = (attempt as u64 * 37) % (delay_ms / 4);
+                    let sleep_duration = std::cmp::min(
+                        delay_ms + jitter, 
+                        max_delay_ms
+                    );
+                    
+                    tokio::time::sleep(Duration::from_millis(sleep_duration)).await;
+                    delay_ms = std::cmp::min(delay_ms * 2, max_delay_ms);
+                }
+            }
+            
+            anyhow::bail!("Operation timed out after {} attempts", attempts)
+        }
+
+        // Initialize the app
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        // Join the group from the first backend and wait for it to be ready
+        {
+            let backend = get_backend().await?;
+            backend.join_from_url(join_url.as_str()).await?;
+            
+            // Using a simpler approach with manual retries
+            let group_id = group.id().clone();
+            let mut found = false;
+            
+            for attempt in 0..10 {
+                match backend.list_groups().await {
+                    Ok(groups) => {
+                        if groups.iter().any(|g| g.id() == group_id) {
+                            found = true;
+                            break;
+                        }
+                        eprintln!("Group not found yet (attempt {}), waiting...", attempt + 1);
+                    }
+                    Err(e) => {
+                        eprintln!("Error checking groups (attempt {}): {}", attempt + 1, e);
+                    }
+                }
+                
+                let delay = 500 * (1 << attempt.min(5)); // Exponential backoff, max 16s
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+            }
+            
+            if !found {
+                anyhow::bail!("Failed to verify group join completion after multiple attempts");
+            }
+        }
+
+        // Call refresh endpoint and handle response
+        let group_id_str = group.id().to_string();
+        let mut refresh_data = serde_json::Value::Null;
+        
+        // Make multiple attempts for the refresh operation
+        for attempt in 0..5 {
+            // Create a fresh request each time since they can't be reused
+            let refresh_req = test::TestRequest::post()
+                .uri(&format!("/api/groups/{}/refresh", group_id_str))
+                .to_request();
+                
+            let refresh_resp = test::call_service(&app, refresh_req).await;
+            if !refresh_resp.status().is_success() {
+                eprintln!("Refresh failed with status: {} (attempt {})", refresh_resp.status(), attempt + 1);
+                tokio::time::sleep(Duration::from_millis(1000 * (attempt + 1))).await;
+                continue;
+            }
+            
+            // Try to parse the response body
+            let body = test::read_body(refresh_resp).await;
+            match serde_json::from_slice::<serde_json::Value>(&body) {
+                Ok(data) => {
+                    refresh_data = data;
+                    if refresh_data["status"] == "success" {
+                        if let Some(refreshed_files) = refresh_data["refreshed_files"].as_array() {
+                            if refreshed_files.iter().any(|f| f.as_str() == Some(file_name)) {
+                                break; // Success case
+                            }
+                        }
+                    }
+                    eprintln!("Refresh response not as expected (attempt {}): {:?}", attempt + 1, refresh_data);
+                }
+                Err(e) => {
+                    eprintln!("Error parsing refresh response (attempt {}): {}", attempt + 1, e);
+                }
+            }
+            
+            // Wait before retrying
+            tokio::time::sleep(Duration::from_millis(1000 * (attempt + 1))).await;
+        }
+        
+        // Check if we got a successful response from any attempt
+        assert_eq!(refresh_data["status"], "success", "Refresh should return success after multiple attempts");
+        
+        // Verify file is accessible with retry logic
+        let repo_id_str = repo.id().to_string();
+        let mut got_file_data = Vec::new();
+        let file_name_clone = file_name.to_string();
+        
+        // Manual retry approach without capturing app
+        for attempt in 0..10 {
+            // Create a fresh request for each attempt
+            let get_file_req = test::TestRequest::get()
+                .uri(&format!(
+                    "/api/groups/{}/repos/{}/media/{}",
+                    group_id_str, repo_id_str, file_name_clone
+                ))
+                .to_request();
+                
+            let get_file_resp = test::call_service(&app, get_file_req).await;
+            if !get_file_resp.status().is_success() {
+                eprintln!("File not yet available, status: {} (attempt {})", 
+                        get_file_resp.status(), attempt + 1);
+                tokio::time::sleep(Duration::from_millis(1000 * (attempt + 1))).await;
+                continue;
+            }
+            
+            got_file_data = test::read_body(get_file_resp).await.to_vec();
+            if got_file_data.as_slice() == file_content {
+                break; // Success - exit the retry loop
+            } else {
+                eprintln!("File content mismatch (attempt {}), retrying...", attempt + 1);
+                tokio::time::sleep(Duration::from_millis(1000 * (attempt + 1))).await;
+            }
+        }
+        
+        // Final verification
+        assert_eq!(
+            got_file_data.as_slice(),
+            file_content,
+            "Downloaded file content should match"
+        );
+
+        // Verify the refresh response had the expected format
+        let refreshed_files = refresh_data["refreshed_files"]
+            .as_array()
+            .expect("refreshed_files should be an array");
+            
+        assert!(
+            refreshed_files.iter().any(|f| f.as_str() == Some(file_name)),
+            "File should be in refreshed_files list"
+        );
+
+        // Clean up in reverse order of initialization - with grace periods
+        backend2.stop().await?;
+        {
+            let backend = get_backend().await?;
+            backend.stop().await.expect("Backend failed to stop");
+        }
+        
+        // Allow time for clean shutdown
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        veilid_api2.shutdown().await;
+
+        Ok(())
+    }
+
         Ok(())
     }
 }
