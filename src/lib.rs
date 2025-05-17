@@ -625,6 +625,197 @@ mod tests {
         Ok(())
     }
 
+    #[actix_web::test]
+    async fn test_concurrent_downloads() -> Result<()> {
+        use std::rc::Rc;
+        
+        // Initialize the app
+        let path = TmpDir::new("test_concurrent_downloads").await?;
+
+        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
+        {
+            let backend = get_backend().await?;
+            backend.start().await.expect("Backend failed to start");
+        }
+
+        let app = Rc::new(
+            test::init_service(
+                App::new()
+                    .service(status)
+                    .service(web::scope("/api").service(groups::scope())),
+            )
+            .await
+        );
+
+        // Step 1: Create a group
+        let create_group_req = test::TestRequest::post()
+            .uri("/api/groups")
+            .set_json(json!({ "name": "Test Group" }))
+            .to_request();
+        let create_group_resp: serde_json::Value =
+            test::call_and_read_body_json(&app, create_group_req).await;
+        let group_id = create_group_resp["key"]
+            .as_str()
+            .expect("No group key returned");
+
+        // Step 2: Create a repo
+        let create_repo_req = test::TestRequest::post()
+            .uri(&format!("/api/groups/{}/repos", group_id))
+            .set_json(json!({ "name": "Test Repo" }))
+            .to_request();
+        let create_repo_resp: serde_json::Value =
+            test::call_and_read_body_json(&app, create_repo_req).await;
+        let repo_id = create_repo_resp["key"]
+            .as_str()
+            .expect("No repo key returned");
+
+        // Step 3: Upload multiple files
+        let file_contents = vec![
+            ("file1.txt", b"Content for file 1"),
+            ("file2.txt", b"Content for file 2"),
+            ("file3.txt", b"Content for file 3"),
+        ];
+
+        for (file_name, content) in &file_contents {
+            let upload_req = test::TestRequest::post()
+                .uri(&format!(
+                    "/api/groups/{}/repos/{}/media/{}",
+                    group_id, repo_id, file_name
+                ))
+                .set_payload(content.to_vec())
+                .to_request();
+            let upload_resp = test::call_service(&app, upload_req).await;
+            assert!(upload_resp.status().is_success(), "File upload failed for {}", file_name);
+        }
+
+        // Step 4: Create download requests
+        let mut download_futures = Vec::new();
+        
+        for (file_name, content) in &file_contents {
+            let get_file_req = test::TestRequest::get()
+                .uri(&format!(
+                    "/api/groups/{}/repos/{}/media/{}",
+                    group_id, repo_id, file_name
+                ))
+                .to_request();
+                
+            let content = content.to_vec();
+            let file_name = file_name.to_string();
+            let app = Rc::clone(&app);
+            
+            // Create a future for each download
+            let download_future = async move {
+                let resp = test::call_service(&app, get_file_req).await;
+                assert!(resp.status().is_success(), "File download failed for {}", file_name);
+                
+                let got_file_data = test::read_body(resp).await;
+                assert_eq!(
+                    got_file_data.to_vec().as_slice(),
+                    content.as_slice(),
+                    "Downloaded content mismatch for {}",
+                    file_name
+                );
+            };
+            
+            download_futures.push(download_future);
+        }
+
+        // Execute all downloads concurrently
+        futures::future::join_all(download_futures).await;
+
+        // Clean up: Stop the backend
+        {
+            let backend = get_backend().await?;
+            backend.stop().await.expect("Backend failed to stop");
+        }
+
+        Ok(())
+    }
+
+    #[actix_web::test]
+    async fn test_repo_permissions() -> Result<()> {
+        // Initialize the app
+        let path = TmpDir::new("test_repo_permissions").await?;
+
+        // Initialize backend2 first (this will be the creator of the group/repo)
+        let store2 = iroh_blobs::store::fs::Store::load(path.to_path_buf().join("iroh2")).await?;
+        let (veilid_api2, update_rx2) = save_dweb_backend::common::init_veilid(
+            path.to_path_buf().join("test2").as_path(),
+            "test2".to_string(),
+        )
+        .await?;
+        let backend2 = save_dweb_backend::backend::Backend::from_dependencies(
+            &path.to_path_buf(),
+            veilid_api2.clone(),
+            update_rx2,
+            store2,
+        )
+        .await
+        .unwrap();
+
+        // Initialize the main backend (this will join the group)
+        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
+        {
+            let backend = get_backend().await?;
+            backend.start().await.expect("Backend failed to start");
+        }
+
+        // Create group and repo in backend2 (creator)
+        let mut group = backend2.create_group().await?;
+        let join_url = group.get_url();
+        group.set_name(TEST_GROUP_NAME).await?;
+
+        let repo = group.create_repo().await?;
+        repo.set_name(TEST_GROUP_NAME).await?;
+
+        // Verify creator has write access
+        let creator_repo: SnowbirdRepo = repo.clone().into();
+        assert!(creator_repo.can_write, "Creator should have write access");
+
+        // Join the group with the main backend
+        {
+            let backend = get_backend().await?;
+            backend.join_from_url(join_url.as_str()).await?;
+        }
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        // Get the repo info through the API for the joined backend
+        let get_repo_req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/groups/{}/repos/{}",
+                group.id().to_string(),
+                repo.id().to_string()
+            ))
+            .to_request();
+        let joined_repo: SnowbirdRepo = test::call_and_read_body_json(&app, get_repo_req).await;
+
+        // Verify joined backend has read-only access
+        assert!(!joined_repo.can_write, "Joined backend should have read-only access");
+
+        // List repos to verify permissions are consistent
+        let list_repos_req = test::TestRequest::get()
+            .uri(&format!("/api/groups/{}/repos", group.id().to_string()))
+            .to_request();
+        let repos_response: ReposResponse = test::call_and_read_body_json(&app, list_repos_req).await;
+        
+        assert_eq!(repos_response.repos.len(), 1, "Should see one repo");
+        assert!(!repos_response.repos[0].can_write, "Listed repo should show read-only access");
+
+        // Clean up
+        backend2.stop().await?;
+        {
+            let backend = get_backend().await?;
+            backend.stop().await.expect("Backend failed to stop");
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        veilid_api2.shutdown().await;
+
         Ok(())
     }
 }
