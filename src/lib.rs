@@ -625,6 +625,90 @@ mod tests {
         Ok(())
     }
 
+    #[actix_web::test]
+    async fn test_repo_permissions() -> Result<()> {
+        // Initialize the app
+        let path = TmpDir::new("test_repo_permissions").await?;
+
+        // Initialize backend2 first (this will be the creator of the group/repo)
+        let store2 = iroh_blobs::store::fs::Store::load(path.to_path_buf().join("iroh2")).await?;
+        let (veilid_api2, update_rx2) = save_dweb_backend::common::init_veilid(
+            path.to_path_buf().join("test2").as_path(),
+            "test2".to_string(),
+        )
+        .await?;
+        let backend2 = save_dweb_backend::backend::Backend::from_dependencies(
+            &path.to_path_buf(),
+            veilid_api2.clone(),
+            update_rx2,
+            store2,
+        )
+        .await
+        .unwrap();
+
+        // Initialize the main backend (this will join the group)
+        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
+        {
+            let backend = get_backend().await?;
+            backend.start().await.expect("Backend failed to start");
+        }
+
+        // Create group and repo in backend2 (creator)
+        let mut group = backend2.create_group().await?;
+        let join_url = group.get_url();
+        group.set_name(TEST_GROUP_NAME).await?;
+
+        let repo = group.create_repo().await?;
+        repo.set_name(TEST_GROUP_NAME).await?;
+
+        // Verify creator has write access
+        let creator_repo: SnowbirdRepo = repo.clone().into();
+        assert!(creator_repo.can_write, "Creator should have write access");
+
+        // Join the group with the main backend
+        {
+            let backend = get_backend().await?;
+            backend.join_from_url(join_url.as_str()).await?;
+        }
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        // Get the repo info through the API for the joined backend
+        let get_repo_req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/groups/{}/repos/{}",
+                group.id().to_string(),
+                repo.id().to_string()
+            ))
+            .to_request();
+        let joined_repo: SnowbirdRepo = test::call_and_read_body_json(&app, get_repo_req).await;
+
+        // Verify joined backend has read-only access
+        assert!(!joined_repo.can_write, "Joined backend should have read-only access");
+
+        // List repos to verify permissions are consistent
+        let list_repos_req = test::TestRequest::get()
+            .uri(&format!("/api/groups/{}/repos", group.id().to_string()))
+            .to_request();
+        let repos_response: ReposResponse = test::call_and_read_body_json(&app, list_repos_req).await;
+        
+        assert_eq!(repos_response.repos.len(), 1, "Should see one repo");
+        assert!(!repos_response.repos[0].can_write, "Listed repo should show read-only access");
+
+        // Clean up
+        backend2.stop().await?;
+        {
+            let backend = get_backend().await?;
+            backend.stop().await.expect("Backend failed to stop");
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        veilid_api2.shutdown().await;
+
         Ok(())
     }
 }

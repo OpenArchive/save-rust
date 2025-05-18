@@ -104,6 +104,7 @@ impl IntoSnowbirdGroupsWithNames for Vec<Box<Group>> {
 pub struct SnowbirdRepo {
     pub key: String,
     pub name: String,
+    pub can_write: bool,
 }
 
 #[async_trait::async_trait]
@@ -120,6 +121,7 @@ impl AsyncFrom<Repo> for SnowbirdRepo {
                 .get_name()
                 .await
                 .unwrap_or_else(|_| "Unknown".to_string()),
+            can_write: repo.can_write(),
         }
     }
 }
@@ -129,6 +131,7 @@ impl From<&Repo> for SnowbirdRepo {
         SnowbirdRepo {
             key: repo.id().to_string(),
             name: "".to_string(),
+            can_write: repo.can_write(),
         }
     }
 }
@@ -138,6 +141,7 @@ impl From<Repo> for SnowbirdRepo {
         SnowbirdRepo {
             key: repo.id().to_string(),
             name: "".to_string(),
+            can_write: repo.can_write(),
         }
     }
 }
