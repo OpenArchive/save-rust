@@ -711,4 +711,44 @@ mod tests {
 
         Ok(())
     }
+
+    #[actix_web::test]
+    async fn test_health_endpoint() -> Result<()> {
+        // Initialize the app
+        let path = TmpDir::new("test-health-endpoint").await?;
+
+        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
+
+        {
+            let backend = get_backend().await?;
+            backend.start().await.expect("Backend failed to start");
+        }
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(health)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        // Test the health endpoint
+        let health_req = test::TestRequest::get().uri("/health").to_request();
+        let health_resp = test::call_service(&app, health_req).await;
+        
+        // Verify response status is 200 OK
+        assert!(health_resp.status().is_success(), "Health endpoint should return 200 OK");
+        
+        // Verify response body
+        let health_data: serde_json::Value = test::read_body_json(health_resp).await;
+        assert_eq!(health_data["status"], "OK", "Health endpoint should return status OK");
+
+        // Clean up
+        {
+            let backend = get_backend().await?;
+            backend.stop().await.expect("Backend failed to stop");
+        }
+
+        Ok(())
+    }
 }
