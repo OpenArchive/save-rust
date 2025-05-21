@@ -65,6 +65,13 @@ pub mod server {
         }))
     }
 
+    #[get("/health")]
+    async fn health() -> impl Responder {
+        HttpResponse::Ok().json(serde_json::json!({
+            "status": "OK"
+        }))
+    }
+
     #[derive(Deserialize)]
     struct JoinGroupRequest {
         uri: String
@@ -138,6 +145,7 @@ pub mod server {
             let app = App::new()
             .wrap(RouteDumper::new(actix_log))
             .service(status)
+            .service(health)
             .service(
                 web::scope("/api")
                     .service(join_group)

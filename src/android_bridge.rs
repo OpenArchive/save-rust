@@ -15,6 +15,7 @@ use std::error::Error;
 use std::sync::{Arc, Mutex, Once};
 use std::thread;
 use veilid_core::veilid_core_setup_android;
+use std::time::Duration;
 
 
 trait IntoJObject {
@@ -104,8 +105,47 @@ pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_Sn
     _clazz: JClass,
     ctx: JObject,
 ) -> jstring {
+    log_debug!(TAG, "Bridge: stopping server");
+
+    // Create a runtime to handle async operations
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    
+    // Stop the backend server and clean up Veilid API
+    let stop_result = runtime.block_on(async {
+        // First stop the backend
+        match crate::server::server::stop().await {
+            Ok(_) => {
+                log_info!(TAG, "Backend stopped successfully");
+                
+                // Get the backend to access Veilid API
+                if let Ok(mut backend) = crate::server::server::get_backend().await {
+                    // Shutdown Veilid API
+                    if let Some(veilid_api) = backend.get_veilid_api() {
+                        veilid_api.shutdown().await;
+                        log_info!(TAG, "Veilid API shut down successfully");
+                    }
+                }
+                
+                // Add a small delay to ensure tasks complete
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                
+                Ok(())
+            }
+            Err(e) => {
+                log_error!(TAG, "Error stopping server: {:?}", e);
+                Err(e)
+            }
+        }
+    });
+
+    // Create response string based on result
+    let response = match stop_result {
+        Ok(_) => "Server stopped successfully",
+        Err(_) => "Error stopping server",
+    };
+
     let output = env
-        .new_string("Server stopped")
+        .new_string(response)
         .expect("Couldn't create java string!");
 
     output.into_raw()

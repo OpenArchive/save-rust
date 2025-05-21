@@ -120,7 +120,16 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
     let key = create_veilid_cryptokey_from_base64(group_id.as_str())?;
     log_debug!(TAG, "Got key {}", key);
 
-    let group = backend.get_group(&key).await?;
+    // Return error if group not found
+    let group = match backend.get_group(&key).await {
+        Ok(group) => group,
+        Err(e) => {
+            return Ok(HttpResponse::NotFound().json(json!({
+                "status": "error",
+                "error": format!("Group not found: {}", e)
+            })));
+        }
+    };
     log_debug!(TAG, "Got group");
 
     // Get all repos in the group
@@ -128,39 +137,107 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
     let repos: Vec<_> = locked_repos.values().cloned().collect();
     drop(locked_repos); // Release the lock before async operations
 
-    let mut refreshed_files = Vec::new();
+    // Return empty arrays if no repos
+    if repos.is_empty() {
+        return Ok(HttpResponse::Ok().json(json!({
+            "status": "success",
+            "refreshed_files": [],
+            "repos": []
+        })));
+    }
+
+    let mut refreshed_repos = Vec::new();
 
     // For each repo, refresh its collection and files
     for repo in repos {
         log_debug!(TAG, "Refreshing repo {}", repo.id());
-        
-        // Refresh collection hash
-        let collection_hash = repo.get_hash_from_dht().await?;
-        if !group.has_hash(&collection_hash).await? {
-            group.download_hash_from_peers(&collection_hash).await?;
-            log_debug!(TAG, "Downloaded collection hash {}", collection_hash);
-        }
 
-        // Get and refresh all files
-        let files = repo.list_files().await?;
-        for file_name in files {
-            match repo.get_file_hash(&file_name).await {
-                Ok(file_hash) => {
-                    if !group.has_hash(&file_hash).await? {
-                        group.download_hash_from_peers(&file_hash).await?;
-                        log_debug!(TAG, "Downloaded file hash {} for {}", file_hash, file_name);
-                        refreshed_files.push(file_name);
+        let mut repo_info = json!({
+            "repo_id": repo.id().to_string(),
+            "can_write": repo.can_write(),
+            "name": repo.get_name().await.unwrap_or_default(),
+            "refreshed_files": json!(Vec::<String>::new()), // Initialize empty
+            "all_files": json!(Vec::<String>::new())       // Initialize empty
+        });
+        let mut refreshed_files_vec = Vec::new();
+        let mut all_files_vec = Vec::new();
+
+        // Get current repo hash and collection info
+        match repo.get_hash_from_dht().await {
+            Ok(repo_hash) => {
+                repo_info["repo_hash"] = json!(repo_hash.to_string());
+                
+                // Refresh collection hash if needed
+                log_debug!(TAG, "Repo {} has DHT hash {}. Checking if group has it locally.", repo.id(), repo_hash);
+                if !group.has_hash(&repo_hash).await? {
+                    log_debug!(TAG, "Repo {} collection {} not found locally. Downloading...", repo.id(), repo_hash);
+                    match group.download_hash_from_peers(&repo_hash).await {
+                        Ok(_) => {
+                            log_debug!(TAG, "Successfully downloaded collection hash {} for repo {}", repo_hash, repo.id());
+                        }
+                        Err(e) => {
+                            log_debug!(TAG, "Error downloading collection hash {} for repo {}: {}", repo_hash, repo.id(), e);
+                            repo_info["error"] = json!(format!("Error downloading collection: {}", e));
+                            refreshed_repos.push(repo_info);
+                            continue; // Skip to next repo if download fails
+                        }
+                    }
+                } else {
+                    log_debug!(TAG, "Repo {} collection {} already local.", repo.id(), repo_hash);
+                }
+
+                // Now that the collection is ensured to be local, list all files in the repo
+                match repo.list_files().await {
+                    Ok(files) => {
+                        log_debug!(TAG, "Repo {} lists files: {:?}", repo.id(), files);
+                        all_files_vec = files;
+                    }
+                    Err(e) => {
+                        log_debug!(TAG, "Error listing files for repo {} after ensuring collection download: {}", repo.id(), e);
+                        // Even if listing fails here, we might have a repo_hash, so continue with empty files.
+                        // Or, handle as a more significant error. For now, log and continue.
+                        repo_info["error_listing_files"] = json!(format!("Error listing files post-download: {}", e));
+                    }
+                };
+                repo_info["all_files"] = json!(all_files_vec.clone());
+
+
+                // For each file, check if it needs to be refreshed
+                for file_name in &all_files_vec {
+                    match repo.get_file_hash(file_name).await {
+                        Ok(file_hash) => {
+                            if !group.has_hash(&file_hash).await? {
+                                log_debug!(TAG, "File {} hash {} not found locally. Downloading...", file_name, file_hash);
+                                match group.download_hash_from_peers(&file_hash).await {
+                                    Ok(_) => {
+                                        log_debug!(TAG, "Successfully downloaded file hash {} for {}", file_hash, file_name);
+                                        refreshed_files_vec.push(file_name.clone());
+                                    }
+                                    Err(e) => {
+                                        log_debug!(TAG, "Error downloading file {} hash {}: {}", file_name, file_hash, e);
+                                        // Optionally add to a list of files that failed to download
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log_debug!(TAG, "Error getting hash for file {}: {}", file_name, e);
+                        }
                     }
                 }
-                Err(e) => {
-                    log_debug!(TAG, "Error getting hash for file {}: {}", file_name, e);
-                }
+                repo_info["refreshed_files"] = json!(refreshed_files_vec);
+            }
+            Err(e) => {
+                log_debug!(TAG, "Error getting repo hash for {}: {}", repo.id(), e);
+                repo_info["error"] = json!(format!("Error getting repo hash from DHT: {}", e));
             }
         }
+
+        refreshed_repos.push(repo_info);
     }
 
     Ok(HttpResponse::Ok().json(json!({
         "status": "success",
-        "refreshed_files": refreshed_files
+        "repos": refreshed_repos
     })))
 }
