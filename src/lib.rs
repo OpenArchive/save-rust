@@ -66,6 +66,7 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial]
     async fn basic_test() -> Result<()> {
         let path = TmpDir::new("save-rust-test").await?;
 
@@ -132,6 +133,7 @@ mod tests {
         Ok(())
     }
     #[actix_web::test]
+    #[serial]
     async fn test_upload_list_delete() -> Result<()> {
         // Initialize the app
         let path = TmpDir::new("test_api_repo_file_operations").await?;
@@ -258,6 +260,7 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial]
     async fn test_join_group() -> Result<()> {
         // Initialize the app
         let path = TmpDir::new("test_api_repo_file_operations").await?;
@@ -342,6 +345,7 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial]
     async fn test_replicate_group() -> Result<()> {
         // Initialize the app
         let path = TmpDir::new("test_api_repo_file_operations").await?;
@@ -860,6 +864,7 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial]
     async fn test_health_endpoint() -> Result<()> {
         // Initialize the app
         let path = TmpDir::new("test-health-endpoint").await?;
