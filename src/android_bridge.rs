@@ -120,7 +120,7 @@ pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_Sn
                 // Get the backend to access Veilid API
                 if let Ok(mut backend) = crate::server::server::get_backend().await {
                     // Shutdown Veilid API
-                    if let Some(veilid_api) = backend.get_veilid_api() {
+                    if let Some(veilid_api) = backend.get_veilid_api().await {
                         veilid_api.shutdown().await;
                         log_info!(TAG, "Veilid API shut down successfully");
                     }
