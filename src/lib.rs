@@ -28,7 +28,7 @@ mod tests {
     use save_dweb_backend::{common::DHTEntity, constants::TEST_GROUP_NAME};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use server::server::{get_backend, init_backend, status, health, BACKEND};
+    use server::{get_backend, init_backend, status, health, BACKEND};
     use tmpdir::TmpDir;
     use base64_url::base64;
     use base64_url::base64::Engine;
@@ -71,15 +71,15 @@ mod tests {
         
         while retry_count < max_retries {
             match tokio::time::timeout(timeout, async {
-        while let Ok(update) = rx.recv().await {
+                while let Ok(update) = rx.recv().await {
                     match &update {
                         VeilidUpdate::Attachment(attachment_state) => {
                             log::debug!("Veilid attachment state: {:?}", attachment_state);
-                if attachment_state.public_internet_ready {
+                            if attachment_state.public_internet_ready {
                                 log::info!("Public internet is ready!");
                                 return Ok(());
-                }
-            }
+                            }
+                        }
                         _ => log::trace!("Received Veilid update: {:?}", update),
                     }
                 }
@@ -438,6 +438,9 @@ mod tests {
             backend.join_from_url(join_url.as_str()).await?;
         }
 
+        // Add delay to ensure proper synchronization after joining
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
         let get_file_req = test::TestRequest::get()
             .uri(&format!(
                 "/api/groups/{}/repos/{}/media/{}",
@@ -458,6 +461,8 @@ mod tests {
 
         // Clean up
         backend2.stop().await?;
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
         {
             let backend = get_backend().await?;
             backend.stop().await.expect("Backend failed to stop");
@@ -467,7 +472,7 @@ mod tests {
         veilid_api2.shutdown().await;
 
         Ok(())
-    }
+    }    
 
     #[actix_web::test]
     #[serial]
