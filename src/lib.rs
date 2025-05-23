@@ -52,17 +52,55 @@ mod tests {
         files: Vec<SnowbirdFile>,
     }
 
-    // Helper: Wait for public internet readiness
+    // Helper: Wait for public internet readiness with timeout and retries
     async fn wait_for_public_internet_ready(backend: &Backend) -> anyhow::Result<()> {
         let mut rx = backend.subscribe_updates().await.ok_or_else(|| anyhow::anyhow!("No update receiver"))?;
+        
+        // Use a shorter timeout for tests (10 seconds)
+        let timeout = if cfg!(test) {
+            Duration::from_secs(10)
+        } else {
+            Duration::from_secs(30)
+        };
+        
+        log::info!("Waiting for public internet to be ready (timeout: {:?})", timeout);
+        
+        // Try up to 3 times with exponential backoff
+        let mut retry_count = 0;
+        let max_retries = 3;
+        
+        while retry_count < max_retries {
+            match tokio::time::timeout(timeout, async {
         while let Ok(update) = rx.recv().await {
-            if let VeilidUpdate::Attachment(attachment_state) = update {
+                    match &update {
+                        VeilidUpdate::Attachment(attachment_state) => {
+                            log::debug!("Veilid attachment state: {:?}", attachment_state);
                 if attachment_state.public_internet_ready {
-                    break;
+                                log::info!("Public internet is ready!");
+                                return Ok(());
+                }
+            }
+                        _ => log::trace!("Received Veilid update: {:?}", update),
+                    }
+                }
+                Err(anyhow::anyhow!("Update channel closed before network was ready"))
+            }).await {
+                Ok(result) => return result,
+                Err(_) => {
+                    retry_count += 1;
+                    if retry_count < max_retries {
+                        let backoff = Duration::from_secs(2u64.pow(retry_count as u32));
+                        log::warn!("Timeout waiting for public internet (attempt {}/{})", retry_count, max_retries);
+                        log::info!("Retrying in {:?}...", backoff);
+                        tokio::time::sleep(backoff).await;
+                        // Resubscribe to get a fresh update channel
+                        rx = backend.subscribe_updates().await.ok_or_else(|| anyhow::anyhow!("No update receiver"))?;
+                    }
                 }
             }
         }
-        Ok(())
+        
+        Err(anyhow::anyhow!("Failed to establish public internet connection after {} attempts", max_retries))
     }
 
     #[actix_web::test]
