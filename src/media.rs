@@ -122,7 +122,7 @@ async fn download_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<impl Re
 }
 
 #[delete("/{file_name}")]
-async fn delete_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<HttpResponse> {
+async fn delete_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<impl Responder> {
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
