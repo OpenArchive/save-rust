@@ -3,18 +3,13 @@ name: CI
 on: [pull_request]
 
 jobs:
-  lint_and_test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        rust: [stable]
-
+  lint:
+    runs-on: ubuntu-latest
     steps:
       - name: Set up Rust toolchain
         uses: hecrj/setup-rust-action@v2
         with:
-          rust-version: ${{ matrix.rust }}
+          rust-version: stable
       
       - name: Check out the code
         uses: actions/checkout@v4
@@ -25,7 +20,34 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test_name: [
+          "tests::basic_test",
+          "tests::test_health_endpoint",
+          "tests::test_join_group",
+          "tests::test_refresh_empty_group",
+          "tests::test_refresh_group_with_file",
+          "tests::test_refresh_group_with_single_repo",
+          "tests::test_refresh_joined_group",
+          "tests::test_refresh_nonexistent_group",
+          "tests::test_replicate_group",
+          "tests::test_upload_list_delete"
+        ]
+
+    steps:
+      - name: Set up Rust toolchain
+        uses: hecrj/setup-rust-action@v2
+        with:
+          rust-version: stable
+      
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Run individual test
         env:
           RUST_MIN_STACK: 8388608
-        run: cargo test --verbose -- --test-threads=1 --nocapture
+        run: cargo test --verbose -- ${{ matrix.test_name }} --test-threads=1 --nocapture
