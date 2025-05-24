@@ -32,7 +32,6 @@ mod tests {
     use tmpdir::TmpDir;
     use base64_url::base64;
     use base64_url::base64::Engine;
-    use env_logger;
     use save_dweb_backend::backend::Backend;
     use veilid_core::VeilidUpdate;
     use serial_test::serial;
@@ -436,7 +435,7 @@ mod tests {
         let file_name = "example.txt";
         let file_content = b"Test content for file upload";
 
-        repo.upload(&file_name, file_content.to_vec()).await?;
+        repo.upload(file_name, file_content.to_vec()).await?;
 
         tokio::time::sleep(Duration::from_secs(2)).await;
 
