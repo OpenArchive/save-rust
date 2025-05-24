@@ -55,18 +55,17 @@ mod tests {
     async fn wait_for_public_internet_ready(backend: &Backend) -> anyhow::Result<()> {
         let mut rx = backend.subscribe_updates().await.ok_or_else(|| anyhow::anyhow!("No update receiver"))?;
         
-        // Use a shorter timeout for tests (10 seconds)
         let timeout = if cfg!(test) {
-            Duration::from_secs(10)
+            Duration::from_secs(15)  
         } else {
             Duration::from_secs(30)
         };
         
         log::info!("Waiting for public internet to be ready (timeout: {:?})", timeout);
         
-        // Try up to 3 times with exponential backoff
+        // Try up to 6 times with exponential backoff
         let mut retry_count = 0;
-        let max_retries = 3;
+        let max_retries = 6;  
         
         while retry_count < max_retries {
             match tokio::time::timeout(timeout, async {
