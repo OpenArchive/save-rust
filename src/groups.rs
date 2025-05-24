@@ -1,14 +1,14 @@
 use actix_web::{web, delete, get, post, Responder, HttpResponse};
-use save_dweb_backend::common::DHTEntity;
 use serde_json::json;
 use crate::error::AppResult;
 use crate::log_debug;
-use crate::models::IntoSnowbirdGroupsWithNames;
-use crate::models::{RequestName, SnowbirdGroup, RequestUrl};
+use crate::models::{IntoSnowbirdGroupsWithNames, RequestName, RequestUrl, SnowbirdGroup};
 use crate::repos;
-use crate::constants::TAG;
-use crate::server::server::get_backend;
+use crate::constants::{TAG};
+
+use crate::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
+use save_dweb_backend::common::DHTEntity;
 
 pub fn scope() -> actix_web::Scope {
     web::scope("/groups")
@@ -160,7 +160,7 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
             "all_files": json!(Vec::<String>::new())       // Initialize empty
         });
         let mut refreshed_files_vec = Vec::new();
-        let mut all_files_vec = Vec::new();
+        let mut all_files_vec: Vec<String> = Vec::new();
 
         // Get current repo hash and collection info
         match repo.get_hash_from_dht().await {
