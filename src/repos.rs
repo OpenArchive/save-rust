@@ -3,14 +3,14 @@ use crate::error::{AppError, AppResult};
 use crate::log_debug;
 use crate::media;
 use crate::models::{AsyncFrom, GroupPath, GroupRepoPath, SnowbirdRepo};
-use crate::server::server::get_backend;
+use crate::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
 use actix_web::{get, post, web, HttpResponse, Responder, Scope};
-use save_dweb_backend::common::DHTEntity;
 use save_dweb_backend::group::Group;
-// use save_dweb_backend::repo::Repo;
+use save_dweb_backend::common::DHTEntity;
 use serde::Deserialize;
 use serde_json::json;
+use anyhow::Result;
 
 pub fn scope() -> Scope {
     web::scope("/repos")
@@ -35,7 +35,7 @@ async fn list_repos(path: web::Path<GroupPath>) -> AppResult<impl Responder> {
     log_debug!(TAG, "group_id = {}", group_id);
 
     // Fetch the backend and the group
-    let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
+    let crypto_key = create_veilid_cryptokey_from_base64(group_id)?;
     let backend = get_backend().await?;
     let group = backend.get_group(&crypto_key).await?;
     log_debug!(TAG, "got group");
@@ -53,12 +53,12 @@ async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
     let repo_id = &path_params.repo_id;
 
     // Fetch the backend and the group
-    let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
+    let crypto_key = create_veilid_cryptokey_from_base64(group_id)?;
     let backend = get_backend().await?;
     let group = backend.get_group(&crypto_key).await?;
 
     // Fetch the repo from the group
-    let repo_crypto_key = create_veilid_cryptokey_from_base64(&repo_id)?;
+    let repo_crypto_key = create_veilid_cryptokey_from_base64(repo_id)?;
     let repo = group.get_repo(&repo_crypto_key).await?;
 
     // Now, convert the owned Repo into SnowbirdRepo
