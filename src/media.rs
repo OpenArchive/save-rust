@@ -155,22 +155,22 @@ async fn upload_file(
 
     // Fetch the backend and group with proper error handling
     let crypto_key = create_veilid_cryptokey_from_base64(group_id)
-        .map_err(|e| anyhow::anyhow!("Invalid group id: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Invalid group id: {e}"))?;
     let backend = get_backend()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to get backend: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to get backend: {e}"))?;
     let group = backend
         .get_group(&crypto_key)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to get group: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to get group: {e}"))?;
 
     // Fetch the repo with proper error handling
     let repo_crypto_key = create_veilid_cryptokey_from_base64(repo_id)
-        .map_err(|e| anyhow::anyhow!("Invalid repo id: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Invalid repo id: {e}"))?;
     let repo = group
         .get_repo(&repo_crypto_key)
         .await
-        .map_err(|e| anyhow::anyhow!("Repo not found: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Repo not found: {e}"))?;
 
     // Log file_name and stream file content
 
@@ -178,7 +178,7 @@ async fn upload_file(
 
     let mut file_data: Vec<u8> = Vec::new();
     while let Some(chunk) = body.next().await {
-        let chunk = chunk.map_err(|e| anyhow::anyhow!("Failed to read file chunk: {}", e))?;
+        let chunk = chunk.map_err(|e| anyhow::anyhow!("Failed to read file chunk: {e}"))?;
         file_data.extend_from_slice(&chunk);
     }
 
@@ -191,7 +191,7 @@ async fn upload_file(
     let updated_collection_hash = repo
         .upload(file_name, file_data)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to upload file: {e}"))?;
 
     Ok(HttpResponse::Ok().json(json!({
         "name": file_name,

@@ -24,8 +24,11 @@ use std::sync::Arc;
 use std::{env, panic};
 use thiserror::Error;
 use tokio::sync::Mutex as TokioMutex;
+
+#[cfg(test)]
+use std::sync::RwLock;
 use veilid_core::{
-    vld0_generate_keypair, CryptoKey, TypedKey, VeilidUpdate, CRYPTO_KIND_VLD0,
+    PublicKey, CryptoTyped, VeilidUpdate, CRYPTO_KIND_VLD0,
     VALID_CRYPTO_KINDS,
 };
 use crate::actix_route_dumper::RouteDumper;
@@ -40,14 +43,48 @@ pub enum BackendError {
     InitializationError(#[from] std::io::Error),
 }
 
+// Production: use OnceCell (efficient, set-once)
+#[cfg(not(test))]
 pub static BACKEND: OnceCell<Arc<TokioMutex<Backend>>> = OnceCell::new();
 
+// Tests: use RwLock (resettable between tests)
+#[cfg(test)]
+pub static BACKEND: RwLock<Option<Arc<TokioMutex<Backend>>>> = RwLock::new(None);
+
+#[cfg(not(test))]
 pub async fn get_backend<'a>(
 ) -> Result<impl std::ops::DerefMut<Target = Backend> + 'a, anyhow::Error> {
     match BACKEND.get() {
         Some(backend) => Ok(backend.lock().await),
         None => Err(anyhow!("Backend not initialized")),
     }
+}
+
+#[cfg(test)]
+pub async fn get_backend(
+) -> Result<tokio::sync::OwnedMutexGuard<Backend>, anyhow::Error> {
+    let backend_arc = {
+        let backend_lock = BACKEND.read().map_err(|e| anyhow!("Failed to read backend lock: {e}"))?;
+        match backend_lock.as_ref() {
+            Some(backend) => Arc::clone(backend),
+            None => return Err(anyhow!("Backend not initialized")),
+        }
+    };
+    Ok(backend_arc.lock_owned().await)
+}
+
+#[cfg(test)]
+pub fn set_backend(backend: Arc<TokioMutex<Backend>>) -> Result<()> {
+    let mut backend_lock = BACKEND.write().map_err(|e| anyhow!("Failed to write backend lock: {e}"))?;
+    *backend_lock = Some(backend);
+    Ok(())
+}
+
+#[cfg(test)]
+pub fn clear_backend() -> Result<()> {
+    let mut backend_lock = BACKEND.write().map_err(|e| anyhow!("Failed to write backend lock: {e}"))?;
+    *backend_lock = None;
+    Ok(())
 }
 
 pub fn init_backend(backend_path: &Path) -> Arc<TokioMutex<Backend>> {
@@ -129,7 +166,13 @@ pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> an
 
     let backend_path = Path::new(backend_base_directory);
 
+    #[cfg(not(test))]
     BACKEND.get_or_init(|| init_backend(backend_path));
+
+    #[cfg(test)]
+    {
+        let _ = set_backend(init_backend(backend_path));
+    }
 
     {
         let mut backend = get_backend().await?;

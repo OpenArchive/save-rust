@@ -21,7 +21,7 @@ pub fn android_log(prio: i32, tag: &str, msg: &str) {
 
 #[cfg(not(target_os = "android"))]
 pub fn android_log(level: i32, tag: &str, msg: &str) {
-    println!("[{:?}] {}: {}", level, tag, msg);
+    println!("[{level:?}] {tag}: {msg}");
 }
 
 // Define log levels

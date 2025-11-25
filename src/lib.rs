@@ -28,13 +28,15 @@ mod tests {
     use save_dweb_backend::{common::DHTEntity, constants::TEST_GROUP_NAME};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use server::{get_backend, init_backend, status, health, BACKEND};
+    use server::{status, health, set_backend, clear_backend};
     use tmpdir::TmpDir;
     use base64_url::base64;
     use base64_url::base64::Engine;
     use save_dweb_backend::backend::Backend;
     use veilid_core::VeilidUpdate;
     use serial_test::serial;
+    use std::sync::Arc;
+    use tokio::sync::Mutex as TokioMutex;
 
     #[derive(Debug, Serialize, Deserialize)]
     struct GroupsResponse {
@@ -49,6 +51,46 @@ mod tests {
     #[derive(Debug, Serialize, Deserialize)]
     struct FilesResponse {
         files: Vec<SnowbirdFile>,
+    }
+
+    /// Helper function to generate unique test config
+    /// Returns (TmpDir, namespace_string)
+    async fn get_test_config(test_name: &str) -> (TmpDir, String) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let namespace = format!("save-rust-{}-{}", test_name, timestamp);
+        let path = TmpDir::new(test_name).await.unwrap();
+        (path, namespace)
+    }
+
+    /// Helper to initialize Backend with unique namespace
+    async fn init_test_backend(test_name: &str) -> Result<TmpDir> {
+        // Clear any previous backend
+        clear_backend()?;
+        
+        let (path, namespace) = get_test_config(test_name).await;
+
+        let store = iroh_blobs::store::fs::Store::load(path.to_path_buf().join("iroh")).await?;
+        let (veilid_api, update_rx) = save_dweb_backend::common::init_veilid(
+            &path.to_path_buf(),
+            namespace,
+        )
+        .await?;
+
+        let backend = Backend::from_dependencies(
+            &path.to_path_buf(),
+            veilid_api,
+            update_rx,
+            store,
+        )
+        .await?;
+        
+        // Set the BACKEND static so routes can access it
+        set_backend(Arc::new(TokioMutex::new(backend)))?;
+        
+        Ok(path)
     }
 
     // Helper: Wait for public internet readiness with timeout and retries
@@ -102,11 +144,15 @@ mod tests {
     }
 
     // Helper function to properly clean up test resources
-    async fn cleanup_test_resources(backend: &Backend) -> Result<()> {
-        log::info!("Cleaning up test resources...");
+    async fn cleanup_test_resources() -> Result<()> {
+        // Get the backend and stop it
+        use server::get_backend;
+        if let Ok(backend) = get_backend().await {
+            backend.stop().await?;
+        }
         
-        // Stop the backend, which will also handle VeilidAPI shutdown
-        backend.stop().await?;
+        // Clear the backend static
+        clear_backend()?;
         
         // Add a small delay to ensure everything is cleaned up
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -117,15 +163,7 @@ mod tests {
     #[actix_web::test]
     #[serial]
     async fn basic_test() -> Result<()> {
-        let path = TmpDir::new("save-rust-test").await?;
-
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-
-        {
-            let backend = get_backend().await?;
-
-            backend.start().await.expect("Backend failed to start");
-        }
+        let _path = init_test_backend("basic_test").await?;
 
         let app = test::init_service(
             App::new()
@@ -173,11 +211,7 @@ mod tests {
 
         assert_eq!(resp.repos.len(), 1, "Should have 1 repo after create");
 
-        {
-            let backend = get_backend().await?;
-
-            backend.stop().await.expect("Backend failed to start");
-        }
+        cleanup_test_resources().await?;
 
         Ok(())
     }
@@ -185,14 +219,7 @@ mod tests {
     #[serial]
     async fn test_upload_list_delete() -> Result<()> {
         // Initialize the app
-        let path = TmpDir::new("test_api_repo_file_operations").await?;
-
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-
-        {
-            let backend = get_backend().await?;
-            backend.start().await.expect("Backend failed to start");
-        }
+        let _path = init_test_backend("test_upload_list_delete").await?;
 
         let app = test::init_service(
             App::new()
@@ -299,11 +326,8 @@ mod tests {
             "File list should be empty after file deletion"
         );
 
-        // Clean up: Stop the backend
-        {
-            let backend = get_backend().await?;
-            cleanup_test_resources(&backend).await?;
-        }
+        // Clean up
+        cleanup_test_resources().await?;
 
         Ok(())
     }
@@ -311,14 +335,8 @@ mod tests {
     #[actix_web::test]
     #[serial]
     async fn test_join_group() -> Result<()> {
-        // Initialize the app
-        let path = TmpDir::new("test_api_repo_file_operations").await?;
-
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-        {
-            let backend = get_backend().await?;
-            backend.start().await.expect("Backend failed to start");
-        }
+        // Initialize main backend
+        let _path = init_test_backend("test_join_group_main").await?;
 
         let app = test::init_service(
             App::new()
@@ -327,14 +345,16 @@ mod tests {
         )
         .await;
 
-        let store2 = iroh_blobs::store::fs::Store::load(path.to_path_buf().join("iroh2")).await?;
+        // Initialize secondary backend with unique namespace
+        let (path2, namespace2) = get_test_config("test_join_group_secondary").await;
+        let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
         let (veilid_api2, update_rx2) = save_dweb_backend::common::init_veilid(
-            path.to_path_buf().join("test2").as_path(),
-            "test2".to_string(),
+            path2.to_path_buf().as_path(),
+            namespace2,
         )
         .await?;
         let backend2 = Backend::from_dependencies(
-            &path.to_path_buf(),
+            &path2.to_path_buf(),
             veilid_api2,
             update_rx2,
             store2,
@@ -384,12 +404,10 @@ mod tests {
 
         assert_eq!(resp.repos.len(), 1, "Should have 1 repo after joining");
 
-        // Clean up both backends using the helper function
-        cleanup_test_resources(&backend2).await?;
-        {
-            let backend = get_backend().await?;
-            cleanup_test_resources(&backend).await?;
-        }
+        // Clean up both backends - secondary first, then main
+        backend2.stop().await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        cleanup_test_resources().await?;
 
         Ok(())
     }
@@ -397,31 +415,25 @@ mod tests {
     #[actix_web::test]
     #[serial]
     async fn test_replicate_group() -> Result<()> {
-        // Initialize the app
-        let path = TmpDir::new("test_replicate_group").await?;
-    
-        // Create second backend (creator) first
-        let store2 = iroh_blobs::store::fs::Store::load(path.to_path_buf().join("iroh2")).await?;
+        // Create secondary backend (creator) first
+        let (path2, namespace2) = get_test_config("test_replicate_group_secondary").await;
+        let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
         let (veilid_api2, update_rx2) = save_dweb_backend::common::init_veilid(
-            path.to_path_buf().join("test2").as_path(),
-            "test2".to_string(),
+            path2.to_path_buf().as_path(),
+            namespace2,
         )
         .await?;
         let backend2 = Backend::from_dependencies(
-            &path.to_path_buf(),
+            &path2.to_path_buf(),
             veilid_api2,
             update_rx2,
             store2,
         )
         .await
         .unwrap();
-    
+
         // Initialize main backend (joiner)
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-        {
-            let backend = get_backend().await?;
-            backend.start().await.expect("Backend failed to start");
-        }
+        let _path = init_test_backend("test_replicate_group_main").await?;
     
         // Create group and repo in backend2 (creator)
         let mut group = backend2.create_group().await?;
@@ -446,6 +458,7 @@ mod tests {
     
         // Join the group using the main backend
         {
+            use server::get_backend;
             let backend = get_backend().await?;
             backend.join_from_url(join_url.as_str()).await?;
         }
@@ -479,18 +492,16 @@ mod tests {
         let file_resp = test::call_service(&app, file_req).await;
         assert!(file_resp.status().is_success(), "File should be accessible after replication");
         let got_content = test::read_body(file_resp).await;
-        assert_eq!(got_content.to_vec(), file_content.to_vec(), 
+        assert_eq!(got_content.to_vec(), file_content.to_vec(),
             "File content should match after replication");
-    
-        // Clean up both backends using the helper function
-        cleanup_test_resources(&backend2).await?;
-        {
-            let backend = get_backend().await?;
-            cleanup_test_resources(&backend).await?;
-        }
-    
+
+        // Clean up both backends - secondary first, then main
+        backend2.stop().await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        cleanup_test_resources().await?;
+
         Ok(())
-    } 
+    }
 
     #[actix_web::test]
     #[serial]
@@ -499,13 +510,8 @@ mod tests {
         let _ = env_logger::try_init();
         log::info!("Testing refresh of non-existent group");
 
-        // Initialize the app with basic setup
-        let path = TmpDir::new("test_refresh_nonexistent").await?;
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-        {
-            let backend = get_backend().await?;
-            backend.start().await.expect("Backend failed to start");
-        }
+        // Initialize backend
+        let _path = init_test_backend("test_refresh_nonexistent").await?;
 
         let app = test::init_service(
             App::new()
@@ -524,10 +530,7 @@ mod tests {
         assert!(non_existent_resp.status().is_client_error(), "Should return error for non-existent group");
 
         // Clean up
-        {
-            let backend = get_backend().await?;
-            cleanup_test_resources(&backend).await?;
-        }
+        cleanup_test_resources().await?;
 
         Ok(())
     }
@@ -539,16 +542,12 @@ mod tests {
         let _ = env_logger::try_init();
         log::info!("Testing refresh of empty group");
 
-        // Initialize the app with basic setup
-        let path = TmpDir::new("test_refresh_empty").await?;
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-        {
-            let backend = get_backend().await?;
-            backend.start().await.expect("Backend failed to start");
-        }
+        // Initialize backend
+        let _path = init_test_backend("test_refresh_empty").await?;
 
         // Create an empty group
         let empty_group = {
+            use server::get_backend;
             let backend = get_backend().await?;
             backend.create_group().await?
         };
@@ -572,10 +571,7 @@ mod tests {
         assert!(empty_group_data["repos"].as_array().unwrap().is_empty());
 
         // Clean up
-        {
-            let backend = get_backend().await?;
-            cleanup_test_resources(&backend).await?;
-        }
+        cleanup_test_resources().await?;
 
         Ok(())
     }
@@ -587,22 +583,19 @@ mod tests {
         let _ = env_logger::try_init();
         log::info!("Testing refresh of group with single repo");
 
-        // Initialize the app with basic setup
-        let path = TmpDir::new("test_refresh_single_repo").await?;
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-        
-        // Start backend and wait for public internet readiness
-        {
-            let backend = get_backend().await?;
-            backend.start().await.expect("Backend failed to start");
-            log::info!("Waiting for public internet readiness...");
-            wait_for_public_internet_ready(&backend).await?;
-            log::info!("Public internet is ready");
-        }
+        // Initialize backend
+        let _path = init_test_backend("test_refresh_single_repo").await?;
 
         // Create a group with a repo and upload a dummy file
         let (group, repo, dummy_file_name, dummy_file_content) = {
+            use server::get_backend;
             let backend = get_backend().await?;
+            
+            // Wait for public internet readiness
+            log::info!("Waiting for public internet readiness...");
+            wait_for_public_internet_ready(&*backend).await?;
+            log::info!("Public internet is ready");
+            
             let mut group = backend.create_group().await?;
             group.set_name(TEST_GROUP_NAME).await?;
             log::info!("Created group with name: {}", TEST_GROUP_NAME);
@@ -676,15 +669,12 @@ mod tests {
         let get_file_resp = test::call_service(&app, get_file_req).await;
         assert!(get_file_resp.status().is_success(), "File should be accessible after refresh");
         let got_content = test::read_body(get_file_resp).await;
-        assert_eq!(got_content.to_vec(), dummy_file_content, 
+        assert_eq!(got_content.to_vec(), dummy_file_content,
             "File content should match after refresh");
 
-        // Clean up with proper delays
+        // Clean up
         log::info!("Cleaning up test resources...");
-        {
-            let backend = get_backend().await?;
-            cleanup_test_resources(&backend).await?;
-        }
+        cleanup_test_resources().await?;
 
         Ok(())
     }
@@ -696,16 +686,12 @@ mod tests {
         let _ = env_logger::try_init();
         log::info!("Testing refresh of group with file");
 
-        // Initialize the app with basic setup
-        let path = TmpDir::new("test_refresh_with_file").await?;
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-        {
-            let backend = get_backend().await?;
-            backend.start().await.expect("Backend failed to start");
-        }
+        // Initialize backend
+        let _path = init_test_backend("test_refresh_with_file").await?;
 
         // Create a group with a repo and upload a file
         let (group, repo) = {
+            use server::get_backend;
             let backend = get_backend().await?;
             let mut group = backend.create_group().await?;
             group.set_name(TEST_GROUP_NAME).await?;
@@ -757,10 +743,7 @@ mod tests {
         assert_eq!(got_content.to_vec(), file_content.to_vec(), "File content should match");
 
         // Clean up
-        {
-            let backend = get_backend().await?;
-            cleanup_test_resources(&backend).await?;
-        }
+        cleanup_test_resources().await?;
 
         Ok(())
     }
@@ -768,22 +751,20 @@ mod tests {
     #[actix_web::test]
     #[serial]
     async fn test_refresh_joined_group() -> Result<()> {
-        // Initialize logging  
+        // Initialize logging
         let _ = env_logger::try_init();
         log::info!("Testing refresh of joined group");
 
-        // Initialize the app
-        let path = TmpDir::new("test_refresh_joined_group").await?;
-
-        // Create second backend (creator) first
-        let store2 = iroh_blobs::store::fs::Store::load(path.to_path_buf().join("iroh2")).await?;
+        // Create secondary backend (creator) first
+        let (path2, namespace2) = get_test_config("test_refresh_joined_secondary").await;
+        let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
         let (veilid_api2, update_rx2) = save_dweb_backend::common::init_veilid(
-            path.to_path_buf().join("test2").as_path(),
-            "test2".to_string(),
+            path2.to_path_buf().as_path(),
+            namespace2,
         )
         .await?;
         let backend2 = Backend::from_dependencies(
-            &path.to_path_buf(),
+            &path2.to_path_buf(),
             veilid_api2,
             update_rx2,
             store2,
@@ -792,11 +773,7 @@ mod tests {
         .unwrap();
 
         // Initialize main backend (joiner)
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-        {
-            let backend = get_backend().await?;
-            backend.start().await.expect("Backend failed to start");
-        }
+        let _path = init_test_backend("test_refresh_joined_main").await?;
 
         // Create group and repo in backend2 (creator)
         let mut group = backend2.create_group().await?;
@@ -821,6 +798,7 @@ mod tests {
 
         // Join the group using the main backend
         {
+            use server::get_backend;
             let backend = get_backend().await?;
             backend.join_from_url(join_url.as_str()).await?;
         }
@@ -885,30 +863,21 @@ mod tests {
         let repo_data2 = &repos2[0];
         let refreshed_files2 = repo_data2["refreshed_files"].as_array()
             .expect("refreshed_files should be an array");
-        assert!(refreshed_files2.is_empty(), 
+        assert!(refreshed_files2.is_empty(),
             "No files should be refreshed on second call since all are present");
 
-        // Clean up both backends using the helper function
-        cleanup_test_resources(&backend2).await?;
-        {
-            let backend = get_backend().await?;
-            cleanup_test_resources(&backend).await?;
-        }
+        // Clean up both backends - secondary first, then main
+        backend2.stop().await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        cleanup_test_resources().await?;
 
         Ok(())
     }
     #[actix_web::test]
     #[serial]
     async fn test_health_endpoint() -> Result<()> {
-        // Initialize the app
-        let path = TmpDir::new("test-health-endpoint").await?;
-
-        BACKEND.get_or_init(|| init_backend(path.to_path_buf().as_path()));
-
-        {
-            let backend = get_backend().await?;
-            backend.start().await.expect("Backend failed to start");
-        }
+        // Initialize backend with unique namespace
+        let _path = init_test_backend("test_health_endpoint").await?;
 
         let app = test::init_service(
             App::new()
@@ -930,10 +899,7 @@ mod tests {
         assert_eq!(health_data["status"], "OK", "Health endpoint should return status OK");
 
         // Clean up
-        {
-            let backend = get_backend().await?;
-            backend.stop().await.expect("Backend failed to stop");
-        }
+        cleanup_test_resources().await?;
 
         Ok(())
     }
