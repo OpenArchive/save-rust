@@ -60,7 +60,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let namespace = format!("save-rust-{}-{}", test_name, timestamp);
+        let namespace = format!("save-rust-{test_name}-{timestamp}");
         let path = TmpDir::new(test_name).await.unwrap();
         (path, namespace)
     }
@@ -103,7 +103,7 @@ mod tests {
             Duration::from_secs(30)
         };
         
-        log::info!("Waiting for public internet to be ready (timeout: {:?})", timeout);
+        log::info!("Waiting for public internet to be ready (timeout: {timeout:?})");
         
         // Try up to 6 times with exponential backoff
         let mut retry_count = 0;
@@ -114,13 +114,13 @@ mod tests {
                 while let Ok(update) = rx.recv().await {
                     match &update {
                         VeilidUpdate::Attachment(attachment_state) => {
-                            log::debug!("Veilid attachment state: {:?}", attachment_state);
+                            log::debug!("Veilid attachment state: {attachment_state:?}");
                             if attachment_state.public_internet_ready {
                                 log::info!("Public internet is ready!");
                                 return Ok(());
                             }
                         }
-                        _ => log::trace!("Received Veilid update: {:?}", update),
+                        _ => log::trace!("Received Veilid update: {update:?}"),
                     }
                 }
                 Err(anyhow::anyhow!("Update channel closed before network was ready"))
@@ -130,8 +130,8 @@ mod tests {
                     retry_count += 1;
                     if retry_count < max_retries {
                         let backoff = Duration::from_secs(2u64.pow(retry_count as u32));
-                        log::warn!("Timeout waiting for public internet (attempt {}/{})", retry_count, max_retries);
-                        log::info!("Retrying in {:?}...", backoff);
+                        log::warn!("Timeout waiting for public internet (attempt {retry_count}/{max_retries})");
+                        log::info!("Retrying in {backoff:?}...");
                         tokio::time::sleep(backoff).await;
                         // Resubscribe to get a fresh update channel
                         rx = backend.subscribe_updates().await.ok_or_else(|| anyhow::anyhow!("No update receiver"))?;
@@ -140,7 +140,7 @@ mod tests {
             }
         }
         
-        Err(anyhow::anyhow!("Failed to establish public internet connection after {} attempts", max_retries))
+        Err(anyhow::anyhow!("Failed to establish public internet connection after {max_retries} attempts"))
     }
 
     // Helper function to properly clean up test resources
@@ -241,7 +241,7 @@ mod tests {
 
         // Step 2: Create a repo via the API
         let create_repo_req = test::TestRequest::post()
-            .uri(&format!("/api/groups/{}/repos", group_id))
+            .uri(&format!("/api/groups/{group_id}/repos"))
             .set_json(json!({ "name": "Test Repo" }))
             .to_request();
         let create_repo_resp: serde_json::Value =
@@ -257,8 +257,7 @@ mod tests {
 
         let upload_req = test::TestRequest::post()
             .uri(&format!(
-                "/api/groups/{}/repos/{}/media/{}",
-                group_id, repo_id, file_name
+                "/api/groups/{group_id}/repos/{repo_id}/media/{file_name}"
             ))
             .set_payload(file_content.to_vec())
             .to_request();
@@ -269,12 +268,12 @@ mod tests {
 
         // Step 4: List files in the repository
         let list_files_req = test::TestRequest::get()
-            .uri(&format!("/api/groups/{}/repos/{}/media", group_id, repo_id))
+            .uri(&format!("/api/groups/{group_id}/repos/{repo_id}/media"))
             .to_request();
         let list_files_resp: FilesResponse =
             test::call_and_read_body_json(&app, list_files_req).await;
 
-        println!("List files response: {:?}", list_files_resp);
+        println!("List files response: {list_files_resp:?}");
 
         // Now check if the response is an array directly
         let files_array = list_files_resp.files;
@@ -289,8 +288,7 @@ mod tests {
 
         let get_file_req = test::TestRequest::get()
             .uri(&format!(
-                "/api/groups/{}/repos/{}/media/{}",
-                group_id, repo_id, file_name
+                "/api/groups/{group_id}/repos/{repo_id}/media/{file_name}"
             ))
             .to_request();
         let get_file_resp = test::call_service(&app, get_file_req).await;
@@ -316,7 +314,7 @@ mod tests {
 
         // Step 6: Verify the file is no longer listed
         let list_files_after_deletion_req = test::TestRequest::get()
-            .uri(&format!("/api/groups/{}/repos/{}/media", group_id, repo_id))
+            .uri(&format!("/api/groups/{group_id}/repos/{repo_id}/media"))
             .to_request();
         let list_files_after_deletion_resp: FilesResponse =
             test::call_and_read_body_json(&app, list_files_after_deletion_req).await;
@@ -524,7 +522,7 @@ mod tests {
         // Test refreshing non-existent group
         let fake_group_id = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([0u8; 32]);
         let non_existent_req = test::TestRequest::post()
-            .uri(&format!("/api/groups/{}/refresh", fake_group_id))
+            .uri(&format!("/api/groups/{fake_group_id}/refresh"))
             .to_request();
         let non_existent_resp = test::call_service(&app, non_existent_req).await;
         assert!(non_existent_resp.status().is_client_error(), "Should return error for non-existent group");
@@ -593,12 +591,12 @@ mod tests {
             
             // Wait for public internet readiness
             log::info!("Waiting for public internet readiness...");
-            wait_for_public_internet_ready(&*backend).await?;
+            wait_for_public_internet_ready(&backend).await?;
             log::info!("Public internet is ready");
             
             let mut group = backend.create_group().await?;
             group.set_name(TEST_GROUP_NAME).await?;
-            log::info!("Created group with name: {}", TEST_GROUP_NAME);
+            log::info!("Created group with name: {TEST_GROUP_NAME}");
             
             let repo = group.create_repo().await?;
             repo.set_name("Test Repo").await?;
@@ -608,7 +606,7 @@ mod tests {
             let dummy_file_name = "dummy.txt";
             let dummy_file_content = b"dummy content".to_vec();
             repo.upload(dummy_file_name, dummy_file_content.clone()).await?;
-            log::info!("Uploaded dummy file: {}", dummy_file_name);
+            log::info!("Uploaded dummy file: {dummy_file_name}");
             
             (group, repo, dummy_file_name, dummy_file_content)
         };
@@ -634,7 +632,7 @@ mod tests {
         
         // Parse and verify response data
         let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
-        log::info!("Refresh response: {:?}", refresh_data);
+        log::info!("Refresh response: {refresh_data:?}");
         
         assert_eq!(refresh_data["status"], "success", "Response should indicate success");
         
