@@ -21,7 +21,7 @@ pub fn android_log(prio: i32, tag: &str, msg: &str) {
 
 #[cfg(not(target_os = "android"))]
 pub fn android_log(level: i32, tag: &str, msg: &str) {
-    println!("[{:?}] {}: {}", level, tag, msg);
+    println!("[{level:?}] {tag}: {msg}");
 }
 
 // Define log levels
@@ -38,7 +38,7 @@ pub const LOG_LEVEL_ERROR: i32 = 6;
 #[macro_export]
 macro_rules! android_log_print {
     ($level:expr, $tag:expr, $($arg:tt)*) => {
-        crate::logging::android_log($level, $tag, &format!("[{}:{}] {}", file!(), line!(), format_args!($($arg)*)))
+        $crate::logging::android_log($level, $tag, &format!("[{}:{}] {}", file!(), line!(), format_args!($($arg)*)))
     }
 }
 
