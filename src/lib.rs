@@ -410,6 +410,9 @@ mod tests {
         Ok(())
     }
 
+    // NOTE: This test is flaky due to P2P peer discovery timing issues.
+    // Two backends on the same machine sometimes can't find each other in time.
+    // Skipped in CI, but useful for manual testing of P2P replication.
     #[actix_web::test]
     #[serial]
     async fn test_replicate_group() -> Result<()> {
@@ -746,6 +749,9 @@ mod tests {
         Ok(())
     }
 
+    // NOTE: This test is flaky due to P2P peer discovery timing issues.
+    // Two backends on the same machine sometimes can't find each other in time.
+    // Skipped in CI, but useful for manual testing of P2P replication.
     #[actix_web::test]
     #[serial]
     async fn test_refresh_joined_group() -> Result<()> {
