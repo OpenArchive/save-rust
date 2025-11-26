@@ -27,6 +27,7 @@ jobs:
   test:
     needs: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         test_name: [
