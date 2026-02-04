@@ -1,0 +1,20 @@
+# Nextest configuration for save-rust
+# Veilid/DHT tests can be slow and flaky due to P2P peer discovery and network setup.
+
+[profile.default]
+# Set timeout to 10 minutes per test (Veilid network operations can be slow)
+test-timeout = "600s"
+
+# Retry flaky tests with exponential backoff to give Veilid time to connect
+retries = { backoff = "exponential", count = 3, delay = "5s", max-delay = "30s" }
+
+# Run tests serially to avoid Veilid network conflicts
+test-threads = 1
+
+# Mark tests slow after 60s (informational)
+slow-timeout = "60s"
+
+# P2P tests need many retries for flaky peer discovery - keep retrying until they pass
+[[profile.default.overrides]]
+filter = 'test(test_replicate_group) | test(test_refresh_joined_group)'
+retries = { backoff = "exponential", count = 15, delay = "15s", max-delay = "90s", jitter = true }

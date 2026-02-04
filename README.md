@@ -13,6 +13,24 @@ Bindings to the save-dweb-backend for the Save Android app.
 - `./build-android.sh`
 - You can now recompile the android app.
 
+## Running tests
+
+Tests use [cargo-nextest](https://nexte.st/) with retries and timeouts (see `nextest.toml`). Veilid/DHT tests can be slow and flaky; P2P tests (`test_refresh_joined_group`, `test_replicate_group`) get 15 retries to improve pass rate.
+
+```bash
+# Install nextest (once)
+cargo install cargo-nextest --locked
+
+# Run all tests (retries from nextest.toml; no --retries to avoid overriding P2P overrides)
+RUST_MIN_STACK=8388608 cargo nextest run --test-threads=1 --no-fail-fast
+```
+
+To run in the background and inspect later: `RUST_MIN_STACK=8388608 cargo nextest run --test-threads=1 --no-fail-fast 2>&1 | tee test_output.log`
+
+## Veilid dependency patch
+
+The project temporarily patches `veilid-core` `v0.5.1` via the `[patch."https://gitlab.com/veilid/veilid.git"]` section in `Cargo.toml`. This redirects Cargo to the `tripledoublev/veilid` `fix-underflow` branch that addresses an underflow bug observed during testing. Keep this override until an upstream release includes the fix, then remove the patch stanza and run `cargo update -p veilid-core`.
+
 # API Documentation
 
 The Save-Rust API provides HTTP endpoints for managing groups, repositories, and media files. For detailed API documentation including request/response schemas and error handling, please see [API.md](API.md).

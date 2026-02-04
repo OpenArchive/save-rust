@@ -29,7 +29,21 @@ impl std::fmt::Debug for AppError {
 impl ResponseError for AppError {
     fn error_response(&self) -> HttpResponse {
         log_error!(TAG, "AppError occurred: {:?}", self);
-        HttpResponse::InternalServerError().json(format!("Something went wrong: {}", self.0))
+
+        // Check if this is a "not ready" error and return 503 instead of 500
+        let error_msg = self.0.to_string();
+        if error_msg.contains("Backend not ready")
+            || error_msg.contains("not initialized")
+            || error_msg.contains("Initialization") {
+            return HttpResponse::ServiceUnavailable()
+                .json(serde_json::json!({
+                    "error": "Service temporarily unavailable",
+                    "message": error_msg,
+                    "retry_after": 5
+                }));
+        }
+
+        HttpResponse::InternalServerError().json(format!("Something went wrong: {error_msg}"))
     }
 }
 

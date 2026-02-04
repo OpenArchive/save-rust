@@ -36,7 +36,6 @@ mod tests {
     use veilid_core::VeilidUpdate;
     use serial_test::serial;
     use std::sync::Arc;
-    use tokio::sync::Mutex as TokioMutex;
 
     #[derive(Debug, Serialize, Deserialize)]
     struct GroupsResponse {
@@ -88,7 +87,7 @@ mod tests {
         .await?;
         
         // Set the BACKEND static so routes can access it
-        set_backend(Arc::new(TokioMutex::new(backend)))?;
+        set_backend(Arc::new(backend))?;
         
         Ok(path)
     }
@@ -273,7 +272,7 @@ mod tests {
         let list_files_resp: FilesResponse =
             test::call_and_read_body_json(&app, list_files_req).await;
 
-        println!("List files response: {list_files_resp:?}");
+
 
         // Now check if the response is an array directly
         let files_array = list_files_resp.files;
@@ -367,11 +366,21 @@ mod tests {
         let repo = group.create_repo().await?;
         repo.set_name(TEST_GROUP_NAME).await?;
 
+        // Wait for backend2 (creator) to be ready
+        wait_for_public_internet_ready(&backend2).await?;
+
+        // Wait for main backend (joiner) to be ready
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            wait_for_public_internet_ready(&backend).await?;
+        }
+
         // Step 1: Create a group via the API
         let join_group_req = test::TestRequest::post()
             .uri("/api/groups/join_from_url")
             .set_json(RequestUrl {
-                url: group.get_url(),
+                url: group.get_url()?,
             })
             .to_request();
         let join_group_resp = test::call_service(&app, join_group_req).await;
@@ -400,7 +409,20 @@ mod tests {
             .to_request();
         let resp: ReposResponse = test::call_and_read_body_json(&app, req).await;
 
-        assert_eq!(resp.repos.len(), 1, "Should have 1 repo after joining");
+        // After joining a group where the creator already created a repo, the joiner should see:
+        // 1. The creator's repo (read-only, replicated via Veilid DHT)
+        // 2. The joiner's own repo (writable, auto-created during join)
+        assert_eq!(resp.repos.len(), 2, "Should have 2 repos after joining: creator's read-only repo + joiner's writable repo");
+
+        // Verify we have exactly one read-only repo (creator's) and one writable repo (joiner's)
+        let read_only_repos: Vec<_> = resp.repos.iter().filter(|r| !r.can_write).collect();
+        let writable_repos: Vec<_> = resp.repos.iter().filter(|r| r.can_write).collect();
+        assert_eq!(read_only_repos.len(), 1, "Should have exactly 1 read-only repo (creator's)");
+        assert_eq!(writable_repos.len(), 1, "Should have exactly 1 writable repo (joiner's auto-created)");
+
+        // Verify the creator's repo has the expected name
+        let creator_repo = read_only_repos[0];
+        assert_eq!(creator_repo.name, TEST_GROUP_NAME, "Creator's repo should have the expected name");
 
         // Clean up both backends - secondary first, then main
         backend2.stop().await?;
@@ -410,9 +432,8 @@ mod tests {
         Ok(())
     }
 
-    // NOTE: This test is flaky due to P2P peer discovery timing issues.
-    // Two backends on the same machine sometimes can't find each other in time.
-    // Skipped in CI, but useful for manual testing of P2P replication.
+    // P2P tests: use in-test retries (like save-dweb-backend) so nextest retries + internal
+    // retry loops give the Veilid network time to converge.
     #[actix_web::test]
     #[serial]
     async fn test_replicate_group() -> Result<()> {
@@ -435,66 +456,78 @@ mod tests {
 
         // Initialize main backend (joiner)
         let _path = init_test_backend("test_replicate_group_main").await?;
-    
+
         // Create group and repo in backend2 (creator)
         let mut group = backend2.create_group().await?;
-        let join_url = group.get_url();
+        let join_url = group.get_url()?;
         group.set_name(TEST_GROUP_NAME).await?;
         let repo = group.create_repo().await?;
         repo.set_name(TEST_GROUP_NAME).await?;
-    
+
         // Upload a file to the repository
         let file_name = "example.txt";
         let file_content = b"Test content for file upload";
         repo.upload(file_name, file_content.to_vec()).await?;
-    
-        tokio::time::sleep(Duration::from_secs(2)).await;
-    
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
         let app = test::init_service(
             App::new()
                 .service(status)
                 .service(web::scope("/api").service(groups::scope())),
         )
         .await;
-    
+
         // Join the group using the main backend
         {
             use server::get_backend;
             let backend = get_backend().await?;
             backend.join_from_url(join_url.as_str()).await?;
         }
-    
-        // Wait for replication to complete
-        tokio::time::sleep(Duration::from_secs(2)).await;
-    
-        // Test HTTP endpoints after replication
-        // 1. Verify group exists and has correct name
-        let groups_req = test::TestRequest::get().uri("/api/groups").to_request();
-        let groups_resp: GroupsResponse = test::call_and_read_body_json(&app, groups_req).await;
-        assert_eq!(groups_resp.groups.len(), 1, "Should have one group after joining");
-        assert_eq!(groups_resp.groups[0].name, Some(TEST_GROUP_NAME.to_string()), 
-            "Group should have correct name");
-    
-        // 2. Verify repo exists and has correct name
-        let repos_req = test::TestRequest::get()
-            .uri(&format!("/api/groups/{}/repos", group.id()))
-            .to_request();
-        let repos_resp: ReposResponse = test::call_and_read_body_json(&app, repos_req).await;
-        assert_eq!(repos_resp.repos.len(), 1, "Should have one repo after joining");
-        assert_eq!(repos_resp.repos[0].name, TEST_GROUP_NAME, "Repo should have correct name");
-    
-        // 3. Verify file exists and has correct content
-        let file_req = test::TestRequest::get()
-            .uri(&format!(
-                "/api/groups/{}/repos/{}/media/{}",
-                group.id(), repo.id(), file_name
-            ))
-            .to_request();
-        let file_resp = test::call_service(&app, file_req).await;
-        assert!(file_resp.status().is_success(), "File should be accessible after replication");
-        let got_content = test::read_body(file_resp).await;
-        assert_eq!(got_content.to_vec(), file_content.to_vec(),
-            "File content should match after replication");
+
+        // Wait for replication; then retry until P2P has propagated (same pattern as save-dweb-backend).
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        let mut retries = 10;
+        loop {
+            let groups_req = test::TestRequest::get().uri("/api/groups").to_request();
+            let groups_resp: GroupsResponse = test::call_and_read_body_json(&app, groups_req).await;
+            let repos_req = test::TestRequest::get()
+                .uri(&format!("/api/groups/{}/repos", group.id()))
+                .to_request();
+            let repos_resp: ReposResponse = test::call_and_read_body_json(&app, repos_req).await;
+            let file_req = test::TestRequest::get()
+                .uri(&format!(
+                    "/api/groups/{}/repos/{}/media/{}",
+                    group.id(),
+                    repo.id(),
+                    file_name
+                ))
+                .to_request();
+            let file_resp = test::call_service(&app, file_req).await;
+
+            let ok = groups_resp.groups.len() == 1
+                && groups_resp.groups[0].name.as_deref() == Some(TEST_GROUP_NAME)
+                && repos_resp.repos.len() == 1
+                && repos_resp.repos[0].name == TEST_GROUP_NAME
+                && file_resp.status().is_success();
+
+            if ok {
+                let got_content = test::read_body(file_resp).await;
+                assert_eq!(got_content.to_vec(), file_content.to_vec(), "File content should match after replication");
+                break;
+            }
+            retries -= 1;
+            if retries == 0 {
+                panic!(
+                    "Replication did not converge after retries. groups: {}, repos: {}, file status: {}",
+                    groups_resp.groups.len(),
+                    repos_resp.repos.len(),
+                    file_resp.status()
+                );
+            }
+            tokio::time::sleep(Duration::from_secs(4)).await;
+        }
 
         // Clean up both backends - secondary first, then main
         backend2.stop().await?;
@@ -749,9 +782,8 @@ mod tests {
         Ok(())
     }
 
-    // NOTE: This test is flaky due to P2P peer discovery timing issues.
-    // Two backends on the same machine sometimes can't find each other in time.
-    // Skipped in CI, but useful for manual testing of P2P replication.
+    // P2P tests: use in-test retries (like save-dweb-backend) so nextest retries + internal
+    // retry loops give the Veilid network time to converge.
     #[actix_web::test]
     #[serial]
     async fn test_refresh_joined_group() -> Result<()> {
@@ -776,12 +808,26 @@ mod tests {
         .await
         .unwrap();
 
+        // Wait for backend2 (creator) to be network-ready
+        log::info!("Waiting for backend2 (creator) public internet readiness...");
+        wait_for_public_internet_ready(&backend2).await?;
+        log::info!("Backend2 (creator) public internet is ready");
+
         // Initialize main backend (joiner)
         let _path = init_test_backend("test_refresh_joined_main").await?;
 
+        // Wait for main backend (joiner) to be network-ready
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            log::info!("Waiting for main backend (joiner) public internet readiness...");
+            wait_for_public_internet_ready(&backend).await?;
+            log::info!("Main backend (joiner) public internet is ready");
+        }
+
         // Create group and repo in backend2 (creator)
         let mut group = backend2.create_group().await?;
-        let join_url = group.get_url();
+        let join_url = group.get_url()?;
         group.set_name(TEST_GROUP_NAME).await?;
         let repo = group.create_repo().await?;
         repo.set_name(TEST_GROUP_NAME).await?;
@@ -791,7 +837,7 @@ mod tests {
         let file_content = b"Test content for file upload";
         repo.upload(file_name, file_content.to_vec()).await?;
 
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(4)).await;
 
         let app = test::init_service(
             App::new()
@@ -807,16 +853,27 @@ mod tests {
             backend.join_from_url(join_url.as_str()).await?;
         }
 
-        // Wait for replication to complete
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        // Wait for replication; then retry refresh until P2P converges (same pattern as save-dweb-backend).
+        tokio::time::sleep(Duration::from_secs(4)).await;
 
-        // Test first refresh - should fetch files from network
-        let refresh_req = test::TestRequest::post()
-            .uri(&format!("/api/groups/{}/refresh", group.id()))
-            .to_request();
-        let refresh_resp = test::call_service(&app, refresh_req).await;
-        assert!(refresh_resp.status().is_success(), "First refresh should succeed");
-        
+        let mut refresh_retries = 10;
+        let refresh_resp = loop {
+            let refresh_req = test::TestRequest::post()
+                .uri(&format!("/api/groups/{}/refresh", group.id()))
+                .to_request();
+            let resp = test::call_service(&app, refresh_req).await;
+            if resp.status().is_success() {
+                break resp;
+            }
+            refresh_retries -= 1;
+            if refresh_retries == 0 {
+                let resp_status = resp.status();
+                let body = test::read_body(resp).await;
+                panic!("First refresh should succeed after retries. Last status: {resp_status}, body: {body:?}");
+            }
+            tokio::time::sleep(Duration::from_secs(4)).await;
+        };
+
         let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
         assert_eq!(refresh_data["status"], "success", "First refresh status should be success");
         
@@ -903,6 +960,122 @@ mod tests {
         assert_eq!(health_data["status"], "OK", "Health endpoint should return status OK");
 
         // Clean up
+        cleanup_test_resources().await?;
+
+        Ok(())
+    }
+
+    #[actix_web::test]
+    #[serial]
+    async fn test_idempotent_create_repo_after_join() -> Result<()> {
+        // This test verifies that POST /api/groups/{group_id}/repos is idempotent
+        // after joining a group (which auto-creates a repo).
+        // The Android UI may call this endpoint after joining, and it should return
+        // the existing repo instead of a 500 error.
+
+        // Initialize main backend (joiner)
+        let _path = init_test_backend("test_idempotent_create_repo_main").await?;
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        // Create secondary backend (creator) with unique namespace
+        let (path2, namespace2) = get_test_config("test_idempotent_create_repo_secondary").await;
+        let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
+        let (veilid_api2, update_rx2) = save_dweb_backend::common::init_veilid(
+            path2.to_path_buf().as_path(),
+            namespace2,
+        )
+        .await?;
+        let backend2 = Backend::from_dependencies(
+            &path2.to_path_buf(),
+            veilid_api2,
+            update_rx2,
+            store2,
+        )
+        .await
+        .unwrap();
+
+        // Create a group on backend2 (creator)
+        let group2 = backend2.create_group().await?;
+        group2.set_name(TEST_GROUP_NAME).await?;
+        let join_url = group2.get_url()?;
+
+        // Wait a bit for DHT propagation
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        // Join the group on backend1 (joiner) - this auto-creates a repo
+        let join_group_req = test::TestRequest::post()
+            .uri("/api/groups/join_from_url")
+            .set_json(RequestUrl {
+                url: join_url.clone(),
+            })
+            .to_request();
+        let join_group_resp = test::call_service(&app, join_group_req).await;
+
+        assert!(join_group_resp.status().is_success(), "Join should succeed");
+        let joined_group: SnowbirdGroup = test::read_body_json(join_group_resp).await;
+        assert_eq!(
+            joined_group.name,
+            Some(TEST_GROUP_NAME.to_string()),
+            "Joined group has expected name"
+        );
+
+        // Wait a bit for the auto-created repo to be fully initialized
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Verify that a repo was auto-created during join
+        let repos_req = test::TestRequest::get()
+            .uri(&format!("/api/groups/{}/repos", joined_group.key))
+            .to_request();
+        let repos_resp: ReposResponse = test::call_and_read_body_json(&app, repos_req).await;
+        assert_eq!(
+            repos_resp.repos.len(),
+            1,
+            "Should have 1 repo after joining. Found: {:?}",
+            repos_resp.repos
+        );
+
+        // Now simulate the Android UI calling POST /api/groups/{group_id}/repos
+        // This should return 200 OK with the existing repo, NOT 500
+        let create_repo_req = test::TestRequest::post()
+            .uri(&format!("/api/groups/{}/repos", joined_group.key))
+            .set_json(RequestName {
+                name: "My Repo".to_string(),
+            })
+            .to_request();
+        let create_repo_resp = test::call_service(&app, create_repo_req).await;
+
+        // This should succeed (200 OK), not fail with 500
+        let resp_status = create_repo_resp.status();
+        let body = test::read_body(create_repo_resp).await;
+        assert!(
+            resp_status.is_success(),
+            "POST /repos after join should return 200 OK, not 500. Status: {resp_status}, Body: {body:?}"
+        );
+
+        // Verify the response contains the repo
+        let repo: SnowbirdRepo = serde_json::from_slice(&body)?;
+        assert_eq!(repo.name, "My Repo", "Repo should have the requested name");
+
+        // Verify there's still only one repo (idempotent)
+        let repos_req2 = test::TestRequest::get()
+            .uri(&format!("/api/groups/{}/repos", joined_group.key))
+            .to_request();
+        let repos_resp2: ReposResponse = test::call_and_read_body_json(&app, repos_req2).await;
+        assert_eq!(
+            repos_resp2.repos.len(),
+            1,
+            "Should still have only 1 repo after idempotent create"
+        );
+
+        // Clean up both backends
+        backend2.stop().await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
         cleanup_test_resources().await?;
 
         Ok(())

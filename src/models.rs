@@ -54,14 +54,14 @@ impl From<&Group> for SnowbirdGroup {
         SnowbirdGroup {
             key: group.id().to_string(),
             name: None,
-            uri: group.get_url(),
+            uri: group.get_url().unwrap_or_default(),
         }
     }
 }
 
 impl SnowbirdGroup {
     pub async fn fill_name(&mut self, group: &Group) {
-        self.name = Some(group.get_name().await.unwrap());
+        self.name = group.get_name().await.ok();
     }
 }
 

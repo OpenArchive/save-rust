@@ -414,10 +414,13 @@ Request Body: Binary file content
 Response:
 ```json
 {
-    "name": "string",                // File name
-    "updated_collection_hash": "string" // Hash of the updated collection
+    "name": "string",                 // File name
+    "updated_collection_hash": "string", // Hash of the updated collection
+    "file_hash": "string"             // Hash of the uploaded file
 }
 ```
+
+`file_hash` is the Veilid content hash stored in the DHT. Clients can use it to verify local uploads, deduplicate media, or trigger replication via the refresh endpoints if the hash is missing locally.
 
 Error Response (400 Bad Request):
 ```json

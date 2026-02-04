@@ -2,3 +2,8 @@
 /target
 platform-build
 private-*
+test_*.log
+.cursor/
+save-data/
+test-output.txt
+test_refresh_joined_group_output.txt
