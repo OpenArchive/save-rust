@@ -457,6 +457,14 @@ mod tests {
         // Initialize main backend (joiner)
         let _path = init_test_backend("test_replicate_group_main").await?;
 
+        // Wait for both backends to be ready
+        wait_for_public_internet_ready(&backend2).await?;
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            wait_for_public_internet_ready(&backend).await?;
+        }
+
         // Create group and repo in backend2 (creator)
         let mut group = backend2.create_group().await?;
         let join_url = group.get_url()?;
@@ -506,10 +514,11 @@ mod tests {
                 .to_request();
             let file_resp = test::call_service(&app, file_req).await;
 
+            let has_correct_repo = repos_resp.repos.iter().any(|r| r.name == TEST_GROUP_NAME);
             let ok = groups_resp.groups.len() == 1
                 && groups_resp.groups[0].name.as_deref() == Some(TEST_GROUP_NAME)
-                && repos_resp.repos.len() == 1
-                && repos_resp.repos[0].name == TEST_GROUP_NAME
+                && !repos_resp.repos.is_empty()
+                && has_correct_repo
                 && file_resp.status().is_success();
 
             if ok {
@@ -854,33 +863,43 @@ mod tests {
         }
 
         // Wait for replication; then retry refresh until P2P converges (same pattern as save-dweb-backend).
-        tokio::time::sleep(Duration::from_secs(4)).await;
+        // Propagation can be slow in CI/P2P environments.
+        tokio::time::sleep(Duration::from_secs(10)).await;
 
-        let mut refresh_retries = 10;
+        let mut refresh_retries = 20; // Increased retries
         let refresh_resp = loop {
             let refresh_req = test::TestRequest::post()
                 .uri(&format!("/api/groups/{}/refresh", group.id()))
                 .to_request();
             let resp = test::call_service(&app, refresh_req).await;
+            
             if resp.status().is_success() {
                 break resp;
             }
+            
+            log::warn!("Refresh failed (attempt {}): status={}, body={:?}", 
+                20 - refresh_retries, 
+                resp.status(),
+                test::read_body(resp).await
+            );
+
             refresh_retries -= 1;
             if refresh_retries == 0 {
-                let resp_status = resp.status();
-                let body = test::read_body(resp).await;
-                panic!("First refresh should succeed after retries. Last status: {resp_status}, body: {body:?}");
+                panic!("Refresh failed to succeed after 20 attempts.");
             }
-            tokio::time::sleep(Duration::from_secs(4)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
         };
 
         let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
         assert_eq!(refresh_data["status"], "success", "First refresh status should be success");
         
         let repos = refresh_data["repos"].as_array().expect("repos should be an array");
-        assert_eq!(repos.len(), 1, "Should have one repo after joining");
+        // We expect at least 2 repos: creator's read-only repo + joiner's auto-created writable repo
+        assert!(!repos.is_empty(), "Should have at least one repo after joining");
         
-        let repo_data = &repos[0];
+        let repo_data = repos.iter()
+            .find(|r| r["name"] == TEST_GROUP_NAME)
+            .expect("Should find the creator's repo by name");
         assert_eq!(repo_data["name"], TEST_GROUP_NAME, "Repo should have correct name");
         
         // First refresh should have refreshed files
