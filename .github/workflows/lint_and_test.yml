@@ -32,7 +32,6 @@ jobs:
       - name: Run tests with retries
         env:
           RUST_MIN_STACK: 8388608
-        # Retries configured in nextest.toml (no CLI override - P2P tests get 15 retries)
+        # Retries configured in nextest.toml (no CLI override)
         # --no-fail-fast: run all tests even when some fail, so we see full results
         run: cargo nextest run --test-threads=1 --no-fail-fast
-

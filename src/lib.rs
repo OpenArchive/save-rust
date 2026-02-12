@@ -198,13 +198,46 @@ mod tests {
 
         assert_eq!(resp.groups.len(), 0);
 
-        let req = test::TestRequest::post()
-            .uri("/api/groups")
-            .set_json(RequestName {
-                name: "example".to_string(),
-            })
-            .to_request();
-        let group: SnowbirdGroup = test::call_and_read_body_json(&app, req).await;
+        // Group creation can fail transiently in CI when relay discovery is unstable.
+        // Retry only this step so basic_test is robust but still fails fast on real errors.
+        let mut group_opt: Option<SnowbirdGroup> = None;
+        let mut last_create_group_error = String::new();
+        for attempt in 1..=6 {
+            let req = test::TestRequest::post()
+                .uri("/api/groups")
+                .set_json(RequestName {
+                    name: "example".to_string(),
+                })
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            let resp_status = resp.status();
+            let body = test::read_body(resp).await;
+
+            if resp_status.is_success() {
+                match serde_json::from_slice::<SnowbirdGroup>(&body) {
+                    Ok(group) => {
+                        group_opt = Some(group);
+                        break;
+                    }
+                    Err(e) => {
+                        last_create_group_error = format!("invalid success payload: {e}; body={body:?}");
+                    }
+                }
+            } else {
+                let body_text = String::from_utf8_lossy(&body).to_string();
+                last_create_group_error = format!("status={resp_status}, body={body_text}");
+                if !body_text.contains("couldn't look up relay") {
+                    break;
+                }
+            }
+
+            if attempt < 6 {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        }
+        let group = group_opt.expect(&format!(
+            "Creating group failed after retries: {last_create_group_error}"
+        ));
 
         assert_eq!(group.name, Some("example".to_string()));
 
@@ -920,7 +953,7 @@ mod tests {
         // Retry refresh until P2P replication converges: the refresh must succeed AND
         // the response must contain the creator's repo (by name) with the uploaded file.
         // Repo names and file lists propagate via DHT and may lag behind the initial join.
-        let mut refresh_retries = 30;
+        let mut refresh_retries = 12;
         let refresh_data: serde_json::Value = loop {
             let refresh_req = test::TestRequest::post()
                 .uri(&format!("/api/groups/{}/refresh", group.id()))
@@ -940,10 +973,10 @@ mod tests {
                     break data;
                 }
                 log::warn!("Refresh succeeded but repo data not yet propagated (attempt {})",
-                    30 - refresh_retries + 1);
+                    12 - refresh_retries + 1);
             } else {
                 log::warn!("Refresh failed (attempt {}): status={}, body={:?}",
-                    30 - refresh_retries + 1,
+                    12 - refresh_retries + 1,
                     resp.status(),
                     test::read_body(resp).await
                 );
@@ -951,9 +984,9 @@ mod tests {
 
             refresh_retries -= 1;
             if refresh_retries == 0 {
-                panic!("Refresh did not converge after 30 attempts.");
+                panic!("Refresh did not converge after 12 attempts.");
             }
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tokio::time::sleep(Duration::from_secs(4)).await;
         };
 
         assert_eq!(refresh_data["status"], "success", "First refresh status should be success");
