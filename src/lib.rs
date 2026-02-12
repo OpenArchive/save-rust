@@ -235,9 +235,9 @@ mod tests {
                 tokio::time::sleep(Duration::from_secs(3)).await;
             }
         }
-        let group = group_opt.expect(&format!(
-            "Creating group failed after retries: {last_create_group_error}"
-        ));
+        let group = group_opt.unwrap_or_else(|| {
+            panic!("Creating group failed after retries: {last_create_group_error}")
+        });
 
         assert_eq!(group.name, Some("example".to_string()));
 
@@ -617,8 +617,7 @@ mod tests {
             download_retries -= 1;
             if download_retries == 0 {
                 panic!(
-                    "File download did not converge after retries. last status: {}",
-                    resp_status
+                    "File download did not converge after retries. last status: {resp_status}"
                 );
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
