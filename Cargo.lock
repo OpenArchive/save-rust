@@ -3660,9 +3660,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f82f6a6d061554e431c5d30117f5fb8192ce2aed4c67a37cf8a11430a1182017"
+checksum = "00311e7a7a584e68bb60d5779cc1e0ed94a23aced561ab822bbe3f6d74ec8195"
 dependencies = [
  "smallvec",
 ]
@@ -5813,7 +5813,6 @@ dependencies = [
 [[package]]
 name = "save-dweb-backend"
 version = "0.3.0"
-source = "git+https://github.com/OpenArchive/save-dweb-backend?tag=v0.3.0#961b70549450d954a68e5df79a3928d5baba4ddc"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5826,6 +5825,7 @@ dependencies = [
  "hex",
  "iroh",
  "iroh-blobs",
+ "keyvaluedb",
  "keyvaluedb-sqlite",
  "rand 0.8.5",
  "rusqlite",
@@ -5836,9 +5836,11 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "tracing-subscriber",
  "url",
  "veilid-core",
  "veilid-iroh-blobs",
+ "veilid-tools 0.5.1 (git+https://gitlab.com/veilid/veilid.git?tag=v0.5.1)",
  "xdg",
 ]
 
@@ -7499,7 +7501,7 @@ dependencies = [
  "veilid-bugsalot",
  "veilid-hashlink",
  "veilid-igd",
- "veilid-tools",
+ "veilid-tools 0.5.1 (git+https://gitlab.com/tripledoublev/veilid.git?branch=fix-underflow)",
  "wasm-bindgen",
  "wasm-bindgen-derive",
  "wasm-bindgen-futures",
@@ -7556,6 +7558,60 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "veilid-core",
+]
+
+[[package]]
+name = "veilid-tools"
+version = "0.5.1"
+source = "git+https://gitlab.com/veilid/veilid.git?tag=v0.5.1#26ad56947e14b6cd280e64da6c424661a1d3d643"
+dependencies = [
+ "android_logger 0.13.3",
+ "async-io",
+ "async-lock 3.4.2",
+ "async_executors",
+ "backtrace",
+ "cfg-if 1.0.4",
+ "chrono",
+ "ctrlc",
+ "eyre",
+ "flume",
+ "fn_name",
+ "futures-util",
+ "futures_codec",
+ "getrandom 0.2.16",
+ "ifstructs",
+ "imbl",
+ "jni 0.21.1",
+ "jni-sys",
+ "js-sys",
+ "lazy_static",
+ "libc",
+ "log",
+ "ndk",
+ "ndk-glue",
+ "netlink-packet-route",
+ "netlink-sys",
+ "nix 0.27.1",
+ "once_cell",
+ "parking_lot",
+ "postcard",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "range-set-blaze",
+ "rtnetlink",
+ "send_wrapper 0.6.0",
+ "serde",
+ "socket2 0.5.10",
+ "static_assertions",
+ "stop-token",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "wasm-bindgen",
+ "wasm-bindgen-derive",
+ "wasm-bindgen-futures",
+ "winapi",
 ]
 
 [[package]]
