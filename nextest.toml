@@ -16,5 +16,5 @@ slow-timeout = "60s"
 
 # P2P tests need many retries for flaky peer discovery - keep retrying until they pass
 [[profile.default.overrides]]
-filter = 'test(test_replicate_group) | test(test_refresh_joined_group)'
+filter = 'test(test_replicate_group) | test(test_refresh_joined_group) | test(test_join_group)'
 retries = { backoff = "exponential", count = 15, delay = "15s", max-delay = "90s", jitter = true }
