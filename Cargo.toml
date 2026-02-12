@@ -65,6 +65,3 @@ serial_test = "2.0"
 [patch."https://gitlab.com/veilid/veilid.git"]
 veilid-core = { git = "https://gitlab.com/tripledoublev/veilid.git", branch = "fix-underflow" }
 
-# Use local save-dweb-backend for testing fixes before publishing.
-[patch."https://github.com/OpenArchive/save-dweb-backend"]
-save-dweb-backend = { path = "../save-dweb-backend" }
