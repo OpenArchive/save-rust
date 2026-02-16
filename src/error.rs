@@ -30,20 +30,17 @@ impl ResponseError for AppError {
     fn error_response(&self) -> HttpResponse {
         log_error!(TAG, "AppError occurred: {:?}", self);
 
-        // Check if this is a "not ready" error and return 503 instead of 500
+        // Keep legacy error body shape for bindings clients that parse a plain string.
+        // We still use 503 for readiness-related failures so callers can retry.
         let error_msg = self.0.to_string();
+        let legacy_body = format!("Something went wrong: {error_msg}");
         if error_msg.contains("Backend not ready")
             || error_msg.contains("not initialized")
             || error_msg.contains("Initialization") {
-            return HttpResponse::ServiceUnavailable()
-                .json(serde_json::json!({
-                    "error": "Service temporarily unavailable",
-                    "message": error_msg,
-                    "retry_after": 5
-                }));
+            return HttpResponse::ServiceUnavailable().json(legacy_body);
         }
 
-        HttpResponse::InternalServerError().json(format!("Something went wrong: {error_msg}"))
+        HttpResponse::InternalServerError().json(legacy_body)
     }
 }
 
