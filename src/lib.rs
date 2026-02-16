@@ -876,6 +876,100 @@ mod tests {
         Ok(())
     }
 
+    #[actix_web::test]
+    #[serial]
+    async fn test_refresh_group_isolation_across_groups() -> Result<()> {
+        let _ = env_logger::try_init();
+        log::info!("Testing refresh isolation across groups");
+
+        let _path = init_test_backend("test_refresh_group_isolation").await?;
+
+        // Create two groups with distinct repos/files.
+        let (group_a, repo_a, group_b, _repo_b, file_a, file_b) = {
+            use server::get_backend;
+            let backend = get_backend().await?;
+
+            let mut group_a = backend.create_group().await?;
+            group_a.set_name("Group A").await?;
+            let repo_a = group_a.create_repo().await?;
+            repo_a.set_name("Repo A").await?;
+            let file_a = "group_a_only.txt";
+            repo_a.upload(file_a, b"alpha".to_vec()).await?;
+
+            let mut group_b = backend.create_group().await?;
+            group_b.set_name("Group B").await?;
+            let repo_b = group_b.create_repo().await?;
+            repo_b.set_name("Repo B").await?;
+            let file_b = "group_b_only.txt";
+            repo_b.upload(file_b, b"beta".to_vec()).await?;
+
+            (group_a, repo_a, group_b, repo_b, file_a, file_b)
+        };
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(health)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        // Refresh group B and verify it only reports its own files.
+        let refresh_req = test::TestRequest::post()
+            .uri(&format!("/api/groups/{}/refresh", group_b.id()))
+            .to_request();
+        let refresh_resp = test::call_service(&app, refresh_req).await;
+        assert!(
+            refresh_resp.status().is_success(),
+            "Refresh should succeed for group B"
+        );
+        let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
+        assert_eq!(refresh_data["status"], "success");
+
+        let repos = refresh_data["repos"].as_array().expect("repos should be an array");
+        assert!(!repos.is_empty(), "Group B should have at least one repo");
+
+        // Aggregate all files reported by refresh for group B.
+        let mut group_b_files = Vec::new();
+        for repo_data in repos {
+            let files = repo_data["all_files"]
+                .as_array()
+                .expect("all_files should be an array");
+            for file in files {
+                if let Some(name) = file.as_str() {
+                    group_b_files.push(name.to_string());
+                }
+            }
+        }
+
+        assert!(
+            group_b_files.iter().any(|f| f == file_b),
+            "Group B refresh should include its own file"
+        );
+        assert!(
+            !group_b_files.iter().any(|f| f == file_a),
+            "Group B refresh should not include Group A file"
+        );
+
+        // Sanity: group A file remains accessible in group A.
+        let get_a_file_req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/groups/{}/repos/{}/media/{}",
+                group_a.id(),
+                repo_a.id(),
+                file_a
+            ))
+            .to_request();
+        let get_a_file_resp = test::call_service(&app, get_a_file_req).await;
+        assert!(
+            get_a_file_resp.status().is_success(),
+            "Group A file should remain accessible in Group A"
+        );
+
+        cleanup_test_resources().await?;
+        Ok(())
+    }
+
     // P2P tests: use in-test retries (like save-dweb-backend) so nextest retries + internal
     // retry loops give the Veilid network time to converge.
     #[actix_web::test]
