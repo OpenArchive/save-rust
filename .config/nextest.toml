@@ -3,16 +3,14 @@
 
 [profile.default]
 # Set timeout to 10 minutes per test (Veilid network operations can be slow)
-test-timeout = "600s"
+# Terminate after 10 periods of 60s.
+slow-timeout = { period = "60s", terminate-after = 10 }
 
 # Retry flaky tests with exponential backoff to give Veilid time to connect
 retries = { backoff = "exponential", count = 3, delay = "5s", max-delay = "30s" }
 
 # Run tests serially to avoid Veilid network conflicts
 test-threads = 1
-
-# Mark tests slow after 60s (informational)
-slow-timeout = "60s"
 
 # P2P tests are flaky in CI, but very high retry counts can stretch failures to >1h.
 # Keep retries moderate so truly broken runs fail fast.
@@ -23,4 +21,4 @@ retries = { backoff = "exponential", count = 4, delay = "8s", max-delay = "45s",
 [[profile.default.overrides]]
 filter = 'test(test_refresh_joined_group)'
 retries = { backoff = "exponential", count = 2, delay = "8s", max-delay = "30s", jitter = true }
-test-timeout = "300s"
+slow-timeout = { period = "60s", terminate-after = 5 }
