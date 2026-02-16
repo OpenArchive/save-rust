@@ -19,6 +19,7 @@ pub mod utils;
 
 #[cfg(test)]
 mod tests {
+    use std::env;
     use std::time::Duration;
 
     use super::*;
@@ -33,6 +34,7 @@ mod tests {
     use base64_url::base64;
     use base64_url::base64::Engine;
     use save_dweb_backend::backend::Backend;
+    use veilid_core::VeilidConfig;
     use veilid_core::VeilidUpdate;
     use serial_test::serial;
     use std::sync::Arc;
@@ -65,6 +67,50 @@ mod tests {
         (path, namespace)
     }
 
+    fn env_flag(name: &str) -> bool {
+        match env::var(name) {
+            Ok(value) => {
+                let normalized = value.trim().to_ascii_lowercase();
+                matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn csv_env(name: &str) -> Option<Vec<String>> {
+        let value = env::var(name).ok()?;
+        let values: Vec<String> = value
+            .split(',')
+            .map(|item| item.trim())
+            .filter(|item| !item.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+        if values.is_empty() {
+            None
+        } else {
+            Some(values)
+        }
+    }
+
+    fn apply_test_network_overrides(config: &mut VeilidConfig) {
+        if !env_flag("SAVE_VEILID_LOCAL_TEST_MODE") {
+            return;
+        }
+
+        let network_key = env::var("SAVE_VEILID_TEST_NETWORK_KEY")
+            .unwrap_or_else(|_| "save-rust-local-test-network".to_string());
+        config.network.network_key_password = Some(network_key);
+
+        // Keep test nodes deterministic and less noisy in CI.
+        config.network.upnp = false;
+        config.network.detect_address_changes = Some(false);
+        config.network.restricted_nat_retries = 0;
+
+        if let Some(bootstrap) = csv_env("SAVE_VEILID_TEST_BOOTSTRAP") {
+            config.network.routing_table.bootstrap = bootstrap;
+        }
+    }
+
     // Local Veilid init for tests so we can tune readiness timeouts without modifying
     // the published `save-dweb-backend` tag dependency.
     async fn init_veilid_for_tests(
@@ -72,7 +118,8 @@ mod tests {
         namespace: String,
         ready_timeout: Duration,
     ) -> anyhow::Result<(veilid_core::VeilidAPI, broadcast::Receiver<VeilidUpdate>)> {
-        let config = save_dweb_backend::common::config_for_dir(base_dir.to_path_buf(), namespace);
+        let mut config = save_dweb_backend::common::config_for_dir(base_dir.to_path_buf(), namespace);
+        apply_test_network_overrides(&mut config);
 
         let (tx, mut rx) = broadcast::channel(32);
         let update_callback: veilid_core::UpdateCallback = Arc::new(move |update| {
