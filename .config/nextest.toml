@@ -22,3 +22,19 @@ retries = { backoff = "exponential", count = 4, delay = "8s", max-delay = "45s",
 filter = 'test(test_refresh_joined_group)'
 retries = { backoff = "exponential", count = 2, delay = "8s", max-delay = "30s", jitter = true }
 slow-timeout = { period = "60s", terminate-after = 5 }
+
+# Faster CI profile used for PR runs.
+[profile.ci-virtual]
+slow-timeout = { period = "30s", terminate-after = 4 }
+retries = { backoff = "exponential", count = 1, delay = "3s", max-delay = "10s", jitter = true }
+test-threads = 1
+
+[[profile.ci-virtual.overrides]]
+filter = 'test(test_replicate_group) | test(test_join_group)'
+retries = { backoff = "exponential", count = 2, delay = "5s", max-delay = "20s", jitter = true }
+slow-timeout = { period = "45s", terminate-after = 4 }
+
+[[profile.ci-virtual.overrides]]
+filter = 'test(test_refresh_joined_group)'
+retries = { backoff = "exponential", count = 1, delay = "5s", max-delay = "15s", jitter = true }
+slow-timeout = { period = "45s", terminate-after = 4 }
