@@ -35,5 +35,10 @@ jobs:
           SAVE_VEILID_LOCAL_TEST_MODE: "1"
           SAVE_VEILID_TEST_NETWORK_KEY: save-rust-ci-${{ github.run_id }}-${{ github.run_attempt }}
         # Retries configured in .config/nextest.toml (nextest default path)
-        # --no-fail-fast: run all tests even when some fail, so we see full results
-        run: cargo nextest run --test-threads=1 --no-fail-fast
+        # --no-fail-fast: run all tests in this PR subset even when some fail.
+        # Exclude long P2P network convergence tests from PR CI; run them in dedicated/nightly workflows.
+        run: >
+          cargo nextest run
+          --test-threads=1
+          --no-fail-fast
+          -E 'not (test(test_join_group) | test(test_replicate_group) | test(test_refresh_joined_group) | test(test_idempotent_create_repo_after_join))'
