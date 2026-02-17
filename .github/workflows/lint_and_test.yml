@@ -35,9 +35,10 @@ jobs:
           SAVE_VEILID_LOCAL_TEST_MODE: "1"
         # Retries configured in .config/nextest.toml (nextest default path)
         # --no-fail-fast: run all tests in this PR subset even when some fail.
-        # Exclude long P2P network convergence tests from PR CI; run them in dedicated/nightly workflows.
+        # Keep PR CI focused on save-rust smoke coverage.
+        # Backend/P2P-heavy tests run in save-dweb-backend and/or dedicated workflows.
         run: >
           cargo nextest run
           --profile ci-virtual
           --no-fail-fast
-          -E 'not (test(test_join_group) | test(test_replicate_group) | test(test_refresh_joined_group) | test(test_idempotent_create_repo_after_join))'
+          -E 'test(basic_test) | test(test_health_endpoint) | test(test_upload_list_delete)'
