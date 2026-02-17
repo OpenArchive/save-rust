@@ -97,9 +97,12 @@ mod tests {
             return;
         }
 
-        let network_key = env::var("SAVE_VEILID_TEST_NETWORK_KEY")
-            .unwrap_or_else(|_| "save-rust-local-test-network".to_string());
-        config.network.network_key_password = Some(network_key);
+        if let Ok(network_key) = env::var("SAVE_VEILID_TEST_NETWORK_KEY") {
+            let key = network_key.trim();
+            if !key.is_empty() {
+                config.network.network_key_password = Some(key.to_string());
+            }
+        }
 
         // Keep test nodes deterministic and less noisy in CI.
         config.network.upnp = false;
