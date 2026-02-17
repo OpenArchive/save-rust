@@ -3,7 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::log_debug;
 use crate::media;
 use crate::models::{AsyncFrom, GroupPath, GroupRepoPath, SnowbirdRepo};
-use crate::server::get_backend;
+use crate::server::{get_backend, ensure_backend_ready};
 use crate::utils::create_veilid_cryptokey_from_base64;
 use actix_web::{get, post, web, HttpResponse, Responder, Scope};
 use save_dweb_backend::group::Group;
@@ -30,6 +30,7 @@ struct CreateRepoRequest {
 
 #[get("")]
 async fn list_repos(path: web::Path<GroupPath>) -> AppResult<impl Responder> {
+    crate::server::ensure_backend_ready().await?;
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     log_debug!(TAG, "group_id = {}", group_id);
@@ -48,6 +49,7 @@ async fn list_repos(path: web::Path<GroupPath>) -> AppResult<impl Responder> {
 
 #[get("")]
 async fn get_repo(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder> {
+    crate::server::ensure_backend_ready().await?;
     let path_params = path.into_inner();
     let group_id = &path_params.group_id;
     let repo_id = &path_params.repo_id;
@@ -74,6 +76,9 @@ async fn create_repo(
 ) -> AppResult<impl Responder> {
     log_debug!(TAG, "start");
 
+    // Ensure backend is fully initialized before proceeding
+    ensure_backend_ready().await?;
+
     let group_id = path.into_inner();
     let repo_data = body.into_inner();
 
@@ -82,7 +87,15 @@ async fn create_repo(
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
     let mut group = backend.get_group(&crypto_key).await?;
 
-    let repo = group.create_repo().await?;
+    // Joining a group now auto-creates a writable repo (save-dweb-backend fix).
+    // The Android UI may still call this endpoint after joining; make it idempotent.
+    // Check for existing repo FIRST to avoid error-path issues with get_group cache.
+    let repo = if let Some(existing) = group.get_own_repo().await {
+        log_debug!(TAG, "Own repo already exists, returning existing (idempotent)");
+        existing
+    } else {
+        group.create_repo().await?
+    };
 
     log_debug!(
         TAG,

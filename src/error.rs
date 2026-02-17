@@ -29,7 +29,18 @@ impl std::fmt::Debug for AppError {
 impl ResponseError for AppError {
     fn error_response(&self) -> HttpResponse {
         log_error!(TAG, "AppError occurred: {:?}", self);
-        HttpResponse::InternalServerError().json(format!("Something went wrong: {}", self.0))
+
+        // Keep legacy error body shape for bindings clients that parse a plain string.
+        // We still use 503 for readiness-related failures so callers can retry.
+        let error_msg = self.0.to_string();
+        let legacy_body = format!("Something went wrong: {error_msg}");
+        if error_msg.contains("Backend not ready")
+            || error_msg.contains("not initialized")
+            || error_msg.contains("Initialization") {
+            return HttpResponse::ServiceUnavailable().json(legacy_body);
+        }
+
+        HttpResponse::InternalServerError().json(legacy_body)
     }
 }
 

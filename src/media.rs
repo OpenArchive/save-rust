@@ -113,12 +113,20 @@ async fn download_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<impl Re
         .get_file_stream(file_name)
         .await?;
 
-    let (content_length, buffered_data) = handle_file_stream(file_data).await?;
+    let (encrypted_length, buffered_data) = handle_file_stream(file_data).await?;
+
+    // Decrypt the file data
+    let (decrypted_data, was_encrypted) = repo.decrypt_file_data(&buffered_data)
+        .map_err(|e| AppError(anyhow::Error::msg(format!("Failed to decrypt file: {e}"))))?;
+
+    if was_encrypted {
+        log_info!(TAG, "File decrypted: {} bytes → {} bytes", encrypted_length, decrypted_data.len());
+    }
 
     Ok(HttpResponse::Ok()
         .content_type("application/octet-stream")
-        .insert_header((header::CONTENT_LENGTH, content_length))
-        .body(buffered_data))
+        .insert_header((header::CONTENT_LENGTH, decrypted_data.len()))
+        .body(decrypted_data))
 }
 
 #[delete("/{file_name}")]
@@ -193,8 +201,14 @@ async fn upload_file(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to upload file: {e}"))?;
 
+    let file_hash = repo
+        .get_file_hash(file_name)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to get file hash: {e}"))?;
+
     Ok(HttpResponse::Ok().json(json!({
         "name": file_name,
         "updated_collection_hash": updated_collection_hash,
+        "file_hash": file_hash,
     })))
 }

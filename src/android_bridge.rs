@@ -2,7 +2,8 @@
 use crate::constants::TAG;
 use crate::jni_globals;
 use crate::logging::android_log;
-use crate::server::server::start;
+use crate::server;
+use crate::server::start;
 use crate::{log_debug, log_error, log_info};
 use jni::errors::Result as JniResult;
 use jni::sys::{jint, jstring};
@@ -113,12 +114,12 @@ pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_Sn
     // Stop the backend server and clean up Veilid API
     let stop_result = runtime.block_on(async {
         // First stop the backend
-        match crate::server::server::stop().await {
+        match server::stop().await {
             Ok(_) => {
                 log_info!(TAG, "Backend stopped successfully");
                 
                 // Get the backend to access Veilid API
-                if let Ok(mut backend) = crate::server::server::get_backend().await {
+                if let Ok(backend) = server::get_backend().await {
                     // Shutdown Veilid API
                     if let Some(veilid_api) = backend.get_veilid_api().await {
                         veilid_api.shutdown().await;
@@ -183,9 +184,6 @@ fn setup_jni_environments(
     Ok(())
 }
 
-// Used this to figure out how to JNI back into the Android app.
-// Keeping for reference, or future tests.
-//
 fn jni_smoke_test<'local>(
     mut env: JNIEnv<'local>,
     context: JObject<'local>,

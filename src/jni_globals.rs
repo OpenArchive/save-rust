@@ -110,29 +110,3 @@ where
 
     f(env)
 }
-
-// pub fn print_class_name() -> Result<()> {
-//     with_env(|env| {
-//         let class = CLASS.lock()
-//             .map_err(|_| JniError::InitializationError("Failed to acquire class lock".into()))?
-//             .as_ref()
-//             .ok_or(JniError::InitializationError("Class not initialized".into()))?;
-
-//         // Get the Class object from our GlobalRef
-//         let class_object = env.call_method(class, "getClass", "()Ljava/lang/Class;", &[])?
-//             .l()?;
-
-//         // Call getName() on the Class object
-//         let name: JString = env.call_method(class_object, "getName", "()Ljava/lang/String;", &[])?
-//             .l()?.into();
-
-//         // Convert the Java string to a Rust string immediately
-//         let class_name = env.get_string(&name)
-//             .map_err(|e| JniError::StringConversionError(format!("Failed to convert class name: {e}")))?
-//             .to_string_lossy()
-//             .into_owned();
-
-//         println!("Class name: {class_name}");
-//         Ok(())
-//     })
-// }

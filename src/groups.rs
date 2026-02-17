@@ -1,7 +1,7 @@
 use actix_web::{web, delete, get, post, Responder, HttpResponse};
 use serde_json::json;
 use crate::error::AppResult;
-use crate::log_debug;
+use crate::{log_debug, log_error};
 use crate::models::{IntoSnowbirdGroupsWithNames, RequestName, RequestUrl, SnowbirdGroup};
 use crate::repos;
 use crate::constants::{TAG};
@@ -24,10 +24,9 @@ pub fn scope() -> actix_web::Scope {
         )
 }
 
-// This doesn't seem to be the way to delete a group.
-//
 #[delete("")]
 async fn delete_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
+    crate::server::ensure_backend_ready().await?;
     let backend = get_backend().await?;
     let group_id = group_id.into_inner();
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
@@ -39,8 +38,9 @@ async fn delete_group(group_id: web::Path<String>) -> AppResult<impl Responder> 
 
 #[get("")]
 async fn get_groups() -> AppResult<impl Responder> {
+    crate::server::ensure_backend_ready().await?;
     let backend = get_backend().await?;
-    let groups = backend.list_groups().await.unwrap();
+    let groups = backend.list_groups().await?;
     let snowbird_groups = groups.into_snowbird_groups_with_names().await;
 
     Ok(HttpResponse::Ok().json(json!({ "groups": snowbird_groups })))
@@ -48,11 +48,12 @@ async fn get_groups() -> AppResult<impl Responder> {
 
 #[get("")]
 async fn get_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
+    crate::server::ensure_backend_ready().await?;
     let backend = get_backend().await?;
     log_debug!(TAG, "got backend");
 
     let group_id = group_id.into_inner();
-    let key = create_veilid_cryptokey_from_base64(group_id.as_str()).unwrap();
+    let key = create_veilid_cryptokey_from_base64(group_id.as_str())?;
     log_debug!(TAG, "got key {}", key);
 
     let backend_group = backend.get_group(&key).await?;
@@ -72,12 +73,16 @@ async fn create_group(request_name: web::Json<RequestName>) -> AppResult<impl Re
 
     log_debug!(TAG, "got body {:?}", request);
 
+    // Ensure backend is fully initialized before proceeding
+    crate::server::ensure_backend_ready().await?;
+
     let backend = get_backend().await?;
     log_debug!(TAG, "got backend");
 
     let backend_group = backend.create_group().await?;
     log_debug!(TAG, "got backend group");
-    log_debug!(TAG, "backend url = {}", backend_group.get_url());
+    // Avoid logging secrets in URLs (pk/sk/enc).
+    log_debug!(TAG, "backend url = <redacted>");
 
     // Set group name using the request
     backend_group.set_name(&request.name).await?;
@@ -96,6 +101,9 @@ async fn join_group_from_url(request_url: web::Json<RequestUrl>) -> AppResult<im
 
     log_debug!(TAG, "Received request with URL: {:?}", request.url);
 
+    // Ensure backend is fully initialized before proceeding
+    crate::server::ensure_backend_ready().await?;
+
     let backend = get_backend().await?;
     log_debug!(TAG, "Obtained backend instance");
 
@@ -113,24 +121,29 @@ async fn join_group_from_url(request_url: web::Json<RequestUrl>) -> AppResult<im
 
 #[post("/refresh")]
 async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder> {
+    crate::server::ensure_backend_ready().await?;
     let backend = get_backend().await?;
-    log_debug!(TAG, "Starting group refresh");
+    log_debug!(TAG, "Starting group refresh for {}", group_id);
 
     let group_id = group_id.into_inner();
     let key = create_veilid_cryptokey_from_base64(group_id.as_str())?;
     log_debug!(TAG, "Got key {}", key);
 
-    // Return error if group not found
-    let group = match backend.get_group(&key).await {
-        Ok(group) => group,
+    // Force reload from DHT by refreshing the group
+    let group = match backend.refresh_group(&key).await {
+        Ok(group) => {
+            log_debug!(TAG, "Successfully refreshed group from DHT");
+            group
+        }
         Err(e) => {
+            log_error!(TAG, "Failed to refresh group from DHT: {}", e);
             return Ok(HttpResponse::NotFound().json(json!({
                 "status": "error",
                 "error": format!("Group not found: {}", e)
             })));
         }
     };
-    log_debug!(TAG, "Got group");
+    log_debug!(TAG, "Got refreshed group");
 
     // Get all repos in the group
     let locked_repos = group.repos.lock().await;
