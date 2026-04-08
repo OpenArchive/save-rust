@@ -3132,7 +3132,7 @@ dependencies = [
 [[package]]
 name = "iroh"
 version = "0.24.0"
-source = "git+https://github.com/tripledoublev/iroh.git?branch=relax-hickory#b3f52f6d8bba462eebd7e3991946d844c9a75039"
+source = "git+https://github.com/tripledoublev/iroh.git?rev=b3f52f6d8bba462eebd7e3991946d844c9a75039#b3f52f6d8bba462eebd7e3991946d844c9a75039"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -3176,7 +3176,7 @@ dependencies = [
 [[package]]
 name = "iroh-base"
 version = "0.24.0"
-source = "git+https://github.com/tripledoublev/iroh.git?branch=relax-hickory#b3f52f6d8bba462eebd7e3991946d844c9a75039"
+source = "git+https://github.com/tripledoublev/iroh.git?rev=b3f52f6d8bba462eebd7e3991946d844c9a75039#b3f52f6d8bba462eebd7e3991946d844c9a75039"
 dependencies = [
  "aead",
  "anyhow",
@@ -3217,7 +3217,7 @@ dependencies = [
 [[package]]
 name = "iroh-blobs"
 version = "0.24.0"
-source = "git+https://github.com/tripledoublev/iroh.git?branch=relax-hickory#b3f52f6d8bba462eebd7e3991946d844c9a75039"
+source = "git+https://github.com/tripledoublev/iroh.git?rev=b3f52f6d8bba462eebd7e3991946d844c9a75039#b3f52f6d8bba462eebd7e3991946d844c9a75039"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -3259,7 +3259,7 @@ dependencies = [
 [[package]]
 name = "iroh-docs"
 version = "0.24.0"
-source = "git+https://github.com/tripledoublev/iroh.git?branch=relax-hickory#b3f52f6d8bba462eebd7e3991946d844c9a75039"
+source = "git+https://github.com/tripledoublev/iroh.git?rev=b3f52f6d8bba462eebd7e3991946d844c9a75039#b3f52f6d8bba462eebd7e3991946d844c9a75039"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -3297,7 +3297,7 @@ dependencies = [
 [[package]]
 name = "iroh-gossip"
 version = "0.24.0"
-source = "git+https://github.com/tripledoublev/iroh.git?branch=relax-hickory#b3f52f6d8bba462eebd7e3991946d844c9a75039"
+source = "git+https://github.com/tripledoublev/iroh.git?rev=b3f52f6d8bba462eebd7e3991946d844c9a75039#b3f52f6d8bba462eebd7e3991946d844c9a75039"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -3337,7 +3337,7 @@ dependencies = [
 [[package]]
 name = "iroh-metrics"
 version = "0.24.0"
-source = "git+https://github.com/tripledoublev/iroh.git?branch=relax-hickory#b3f52f6d8bba462eebd7e3991946d844c9a75039"
+source = "git+https://github.com/tripledoublev/iroh.git?rev=b3f52f6d8bba462eebd7e3991946d844c9a75039#b3f52f6d8bba462eebd7e3991946d844c9a75039"
 dependencies = [
  "anyhow",
  "erased_set",
@@ -3357,7 +3357,7 @@ dependencies = [
 [[package]]
 name = "iroh-net"
 version = "0.24.0"
-source = "git+https://github.com/tripledoublev/iroh.git?branch=relax-hickory#b3f52f6d8bba462eebd7e3991946d844c9a75039"
+source = "git+https://github.com/tripledoublev/iroh.git?rev=b3f52f6d8bba462eebd7e3991946d844c9a75039#b3f52f6d8bba462eebd7e3991946d844c9a75039"
 dependencies = [
  "anyhow",
  "backoff",
@@ -5750,7 +5750,7 @@ dependencies = [
 
 [[package]]
 name = "save"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "actix-web",
  "anyhow",
