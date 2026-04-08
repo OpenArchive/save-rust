@@ -4,8 +4,8 @@
 //!   cargo run --bin save-server [-- <base_dir>]
 //!
 //! The server listens on:
-//!   - HTTP: http://0.0.0.0:8080
 //!   - Unix socket: <base_dir>/save-server.sock
+//!   - Optional HTTP: http://127.0.0.1:8080 when SAVE_ENABLE_TCP=1 and SAVE_API_TOKEN is set
 //!
 //! Set RUST_LOG to control log verbosity, e.g.:
 //!   RUST_LOG=debug cargo run --bin save-server
@@ -35,7 +35,11 @@ async fn main() -> anyhow::Result<()> {
     println!("save-server v{}", env!("CARGO_PKG_VERSION"));
     println!("  Data directory: {base_dir}");
     println!("  Unix socket:    {socket_path}");
-    println!("  HTTP:           http://127.0.0.1:8080");
+    println!("  HTTP:           disabled by default");
+    if std::env::var("SAVE_ENABLE_TCP").ok().as_deref() == Some("1") {
+        println!("  HTTP:           http://127.0.0.1:8080");
+        println!("  Auth:           Authorization: Bearer $SAVE_API_TOKEN");
+    }
 
     save::server::start(&base_dir, &socket_path).await
 }

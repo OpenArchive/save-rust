@@ -6,7 +6,7 @@ use crate::logging::android_log;
 use crate::repos;
 use crate::{log_debug, log_error, log_info};
 use actix_web::{get, post};
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{body::BoxBody, dev::ServiceRequest, middleware, web, App, HttpResponse, HttpServer, Responder};
 use anyhow::{anyhow, Context, Result};
 use num_cpus;
 use once_cell::sync::OnceCell;
@@ -128,6 +128,58 @@ struct JoinGroupRequest {
     uri: String
 }
 
+#[derive(Clone)]
+pub(crate) struct TcpAuthConfig {
+    pub(crate) token: Arc<String>,
+}
+
+fn env_var_is_truthy(name: &str) -> bool {
+    env::var(name)
+        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
+pub(crate) async fn require_tcp_api_token(
+    req: ServiceRequest,
+    next: middleware::Next<BoxBody>,
+) -> Result<actix_web::dev::ServiceResponse<BoxBody>, actix_web::Error> {
+    let needs_tcp_auth = req.peer_addr().is_some() && req.path().starts_with("/api");
+
+    if !needs_tcp_auth {
+        return next.call(req).await;
+    }
+
+    let auth = req
+        .app_data::<web::Data<TcpAuthConfig>>()
+        .map(|cfg| cfg.token.clone());
+
+    let Some(expected_token) = auth else {
+        return Ok(req.into_response(
+            HttpResponse::InternalServerError().json(json!({
+                "status": "error",
+                "error": "TCP API authentication is not configured"
+            }))
+        ));
+    };
+
+    let provided = req
+        .headers()
+        .get(actix_web::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+
+    if provided == Some(expected_token.as_str()) {
+        return next.call(req).await;
+    }
+
+    Ok(req.into_response(
+        HttpResponse::Unauthorized().json(json!({
+            "status": "error",
+            "error": "Missing or invalid API token"
+        }))
+    ))
+}
+
 #[post("memberships")]
 async fn join_group(body: web::Json<JoinGroupRequest>) -> AppResult<impl Responder> {
     let join_request_data = body.into_inner();
@@ -182,6 +234,17 @@ pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> an
 
     let lan_address = Ipv4Addr::LOCALHOST; // 127.0.0.1
     let lan_port = 8080;
+    let enable_tcp = env_var_is_truthy("SAVE_ENABLE_TCP");
+    let tcp_auth = if enable_tcp {
+        let token = env::var("SAVE_API_TOKEN").context(
+            "SAVE_API_TOKEN must be set when SAVE_ENABLE_TCP is enabled"
+        )?;
+        Some(web::Data::new(TcpAuthConfig {
+            token: Arc::new(token),
+        }))
+    } else {
+        None
+    };
 
     panic::set_hook(Box::new(|panic_info| {
         log_error!(TAG, "Panic occurred: {:?}", panic_info);
@@ -230,8 +293,9 @@ pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> an
 
     let web_server = HttpServer::new(move || {
         let app_start = Instant::now();
-        let app = App::new()
+        let mut app = App::new()
         .wrap(RouteDumper::new(actix_log))
+        .wrap(middleware::from_fn(require_tcp_api_token))
         .service(status)
         .service(health)
         .service(health_ready)
@@ -240,11 +304,22 @@ pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> an
                 .service(join_group)
                 .service(groups::scope())
         );
+
+        if let Some(tcp_auth) = tcp_auth.clone() {
+            app = app.app_data(tcp_auth);
+        }
         log_perf("Web server app created", app_start.elapsed());
         app
     })
-    .bind_uds(server_socket_path)?
-    .bind((lan_address, lan_port))?
+    .bind_uds(server_socket_path)?;
+
+    let web_server = if enable_tcp {
+        log_info!(TAG, "TCP API enabled on {}:{} with bearer token auth", lan_address, lan_port);
+        web_server.bind((lan_address, lan_port))?
+    } else {
+        log_info!(TAG, "TCP API disabled; serving API on Unix domain socket only");
+        web_server
+    }
     .disable_signals()
     .workers(worker_count);
 
