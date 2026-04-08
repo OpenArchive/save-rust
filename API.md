@@ -2,6 +2,18 @@
 
 This document provides detailed information about the Save-Rust API endpoints, including request/response schemas and error handling.
 
+## Transport
+
+Save-Rust always serves its API over a Unix domain socket.
+
+Localhost TCP on `127.0.0.1:8080` is disabled by default. To enable it explicitly, set both `SAVE_ENABLE_TCP=1` and `SAVE_API_TOKEN=<random-secret>`.
+
+When TCP is enabled, requests to `/api/*` must include:
+
+```http
+Authorization: Bearer <SAVE_API_TOKEN>
+```
+
 ## Table of Contents
 - [General Endpoints](#general-endpoints)
 - [Groups Endpoints](#groups-endpoints)

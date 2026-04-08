@@ -33,7 +33,20 @@ The project temporarily patches `veilid-core` `v0.5.1` via the `[patch."https://
 
 # API Documentation
 
-The Save-Rust API provides HTTP endpoints for managing groups, repositories, and media files. For detailed API documentation including request/response schemas and error handling, please see [API.md](API.md).
+The Save-Rust API provides endpoints for managing groups, repositories, and media files. For detailed API documentation including request/response schemas and error handling, please see [API.md](API.md).
+
+## Transport
+
+The service always listens on a Unix domain socket.
+
+Localhost TCP on `127.0.0.1:8080` is disabled by default. To enable it explicitly, set:
+
+- `SAVE_ENABLE_TCP=1`
+- `SAVE_API_TOKEN=<random-secret>`
+
+When TCP is enabled, requests under `/api` must include:
+
+- `Authorization: Bearer <SAVE_API_TOKEN>`
 
 ## Available Endpoints
 

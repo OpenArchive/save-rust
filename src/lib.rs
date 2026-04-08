@@ -20,16 +20,17 @@ pub mod utils;
 #[cfg(test)]
 mod tests {
     use std::env;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::Duration;
 
     use super::*;
-    use actix_web::{test, web, App};
+    use actix_web::{http::header, middleware, test, web, App, HttpResponse};
     use anyhow::Result;
     use models::{RequestName, RequestUrl, SnowbirdFile, SnowbirdGroup, SnowbirdRepo};
     use save_dweb_backend::{common::DHTEntity, constants::TEST_GROUP_NAME};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use server::{status, health, set_backend, clear_backend};
+    use server::{clear_backend, health, require_tcp_api_token, set_backend, status, TcpAuthConfig};
     use tmpdir::TmpDir;
     use base64_url::base64;
     use base64_url::base64::Engine;
@@ -319,6 +320,102 @@ mod tests {
 
         Ok(())
     }
+
+    #[actix_web::test]
+    async fn test_api_middleware_allows_requests_without_peer_addr() {
+        let app = test::init_service(
+            App::new()
+                .wrap(middleware::from_fn(require_tcp_api_token))
+                .service(
+                    web::scope("/api").route(
+                        "/probe",
+                        web::get().to(|| async { HttpResponse::Ok().json(json!({ "status": "ok" })) }),
+                    ),
+                ),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/api/probe").to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert!(resp.status().is_success());
+    }
+
+    #[actix_web::test]
+    async fn test_api_middleware_rejects_tcp_requests_without_token() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(TcpAuthConfig {
+                    token: Arc::new("secret-token".to_string()),
+                }))
+                .wrap(middleware::from_fn(require_tcp_api_token))
+                .service(
+                    web::scope("/api").route(
+                        "/probe",
+                        web::get().to(|| async { HttpResponse::Ok().json(json!({ "status": "ok" })) }),
+                    ),
+                ),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/probe")
+            .peer_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 45678))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), actix_web::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[actix_web::test]
+    async fn test_api_middleware_allows_tcp_requests_with_token() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(TcpAuthConfig {
+                    token: Arc::new("secret-token".to_string()),
+                }))
+                .wrap(middleware::from_fn(require_tcp_api_token))
+                .service(
+                    web::scope("/api").route(
+                        "/probe",
+                        web::get().to(|| async { HttpResponse::Ok().json(json!({ "status": "ok" })) }),
+                    ),
+                ),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/probe")
+            .peer_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 45678))
+            .insert_header((header::AUTHORIZATION, "Bearer secret-token"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert!(resp.status().is_success());
+    }
+
+    #[actix_web::test]
+    async fn test_non_api_routes_do_not_require_tcp_token() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(TcpAuthConfig {
+                    token: Arc::new("secret-token".to_string()),
+                }))
+                .wrap(middleware::from_fn(require_tcp_api_token))
+                .service(status)
+                .service(health),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/status")
+            .peer_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 45678))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert!(resp.status().is_success());
+    }
+
     #[actix_web::test]
     #[serial]
     async fn test_upload_list_delete() -> Result<()> {

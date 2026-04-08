@@ -129,8 +129,8 @@ struct JoinGroupRequest {
 }
 
 #[derive(Clone)]
-struct TcpAuthConfig {
-    token: Arc<String>,
+pub(crate) struct TcpAuthConfig {
+    pub(crate) token: Arc<String>,
 }
 
 fn env_var_is_truthy(name: &str) -> bool {
@@ -139,7 +139,7 @@ fn env_var_is_truthy(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-async fn require_tcp_api_token(
+pub(crate) async fn require_tcp_api_token(
     req: ServiceRequest,
     next: middleware::Next<BoxBody>,
 ) -> Result<actix_web::dev::ServiceResponse<BoxBody>, actix_web::Error> {
