@@ -5781,8 +5781,8 @@ dependencies = [
 
 [[package]]
 name = "save-dweb-backend"
-version = "0.3.3"
-source = "git+https://github.com/OpenArchive/save-dweb-backend?tag=v0.3.3#1eb5f492eee2c50b5e9782f69c58205a89a04233"
+version = "0.3.4"
+source = "git+https://github.com/OpenArchive/save-dweb-backend?tag=v0.3.4#e997584efa0a6a2ad5af116045508e8b7eef75c6"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -7474,8 +7474,8 @@ dependencies = [
 
 [[package]]
 name = "veilid-iroh-blobs"
-version = "0.3.1"
-source = "git+https://github.com/RangerMauve/veilid-iroh-blobs?tag=v0.3.1#e17c546c278266c1108d1ca756c9e31e03432b18"
+version = "0.3.2"
+source = "git+https://github.com/RangerMauve/veilid-iroh-blobs?tag=v0.3.2#9c58b16fde7c2a881dc057e0556b1ae66a51a2c2"
 dependencies = [
  "anyhow",
  "bytes 1.11.1",
