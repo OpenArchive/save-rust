@@ -175,6 +175,32 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
         let mut refreshed_files_vec = Vec::new();
         let mut all_files_vec: Vec<String> = Vec::new();
 
+        if repo.can_write() {
+            match repo.list_files().await {
+                Ok(files) => {
+                    log_debug!(
+                        TAG,
+                        "Writable repo {} lists local files: {:?}",
+                        repo.id(),
+                        files
+                    );
+                    repo_info["all_files"] = json!(files);
+                }
+                Err(e) => {
+                    log_debug!(
+                        TAG,
+                        "Error listing local writable repo {}: {}",
+                        repo.id(),
+                        e
+                    );
+                    repo_info["error_listing_files"] =
+                        json!(format!("Error listing local writable repo files: {}", e));
+                }
+            }
+            refreshed_repos.push(repo_info);
+            continue;
+        }
+
         // Get current repo hash and collection info
         match repo.get_hash_from_dht().await {
             Ok(repo_hash) => {
