@@ -5762,6 +5762,7 @@ dependencies = [
  "env_logger",
  "eyre",
  "futures",
+ "hickory-resolver",
  "iroh-blobs",
  "jni 0.21.1",
  "lazy_static",

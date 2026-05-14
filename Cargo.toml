@@ -48,6 +48,7 @@ num_cpus = "1.16.0"
 tokio-stream = "0.1.16"
 bytes = "1.7.2"
 iroh-blobs = "0.24.0"
+hickory-resolver = "=0.25.2"
 log = "0.4"
 env_logger = "0.10"
 
