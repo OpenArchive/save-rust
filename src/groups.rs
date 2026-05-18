@@ -176,6 +176,16 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
         let mut all_files_vec: Vec<String> = Vec::new();
 
         if repo.can_write() {
+            match repo.get_hash_from_dht().await {
+                Ok(repo_hash) => {
+                    repo_info["repo_hash"] = json!(repo_hash.to_string());
+                }
+                Err(e) => {
+                    log_debug!(TAG, "Error getting repo hash for {}: {}", repo.id(), e);
+                    repo_info["error"] = json!(format!("Error getting repo hash from DHT: {}", e));
+                }
+            }
+
             match repo.list_files().await {
                 Ok(files) => {
                     log_debug!(
