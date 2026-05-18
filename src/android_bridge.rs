@@ -15,9 +15,8 @@ use lazy_static::lazy_static;
 use std::error::Error;
 use std::sync::{Arc, Mutex, Once};
 use std::thread;
-use veilid_core::veilid_core_setup_android;
 use std::time::Duration;
-
+use veilid_core::veilid_core_setup_android;
 
 trait IntoJObject {
     fn into_jobject(&self) -> JObject;
@@ -110,14 +109,14 @@ pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_Sn
 
     // Create a runtime to handle async operations
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    
+
     // Stop the backend server and clean up Veilid API
     let stop_result = runtime.block_on(async {
         // First stop the backend
         match server::stop().await {
             Ok(_) => {
                 log_info!(TAG, "Backend stopped successfully");
-                
+
                 // Get the backend to access Veilid API
                 if let Ok(backend) = server::get_backend().await {
                     // Shutdown Veilid API
@@ -126,10 +125,10 @@ pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_Sn
                         log_info!(TAG, "Veilid API shut down successfully");
                     }
                 }
-                
+
                 // Add a small delay to ensure tasks complete
                 tokio::time::sleep(Duration::from_millis(500)).await;
-                
+
                 Ok(())
             }
             Err(e) => {

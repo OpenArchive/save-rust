@@ -1,11 +1,13 @@
 use crate::constants::TAG;
 use crate::error::{AppError, AppResult};
+use crate::log_info;
 use crate::models::{GroupRepoMediaPath, GroupRepoPath};
 use crate::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
-use crate::log_info;
-use actix_web::{delete, get, post, web, HttpResponse, Responder, Scope, http::header, error::BlockingError};
-use bytes::{BytesMut, Bytes};
+use actix_web::{
+    delete, error::BlockingError, get, http::header, post, web, HttpResponse, Responder, Scope,
+};
+use bytes::{Bytes, BytesMut};
 use futures::Stream;
 use futures::StreamExt;
 use serde_json::json;
@@ -23,7 +25,9 @@ pub fn from_blocking<T>(result: Result<T, BlockingError>) -> AppResult<T> {
     result.map_err(AppError::from)
 }
 
-async fn handle_file_stream(mut file_data: impl Stream<Item = Result<Bytes, io::Error>> + Unpin) -> AppResult<(usize, Bytes)> {
+async fn handle_file_stream(
+    mut file_data: impl Stream<Item = Result<Bytes, io::Error>> + Unpin,
+) -> AppResult<(usize, Bytes)> {
     let mut buffer = BytesMut::new();
     let mut length = 0;
 
@@ -33,9 +37,7 @@ async fn handle_file_stream(mut file_data: impl Stream<Item = Result<Bytes, io::
         length += chunk.len();
     }
 
-    let final_buffer = web::block(move || {
-        buffer.freeze()
-    }).await?;
+    let final_buffer = web::block(move || buffer.freeze()).await?;
 
     Ok((length, final_buffer))
 }
@@ -109,18 +111,22 @@ async fn download_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<impl Re
         group.download_hash_from_peers(&file_hash).await?;
     }
     // Trigger file download from peers using the hash
-    let file_data = repo
-        .get_file_stream(file_name)
-        .await?;
+    let file_data = repo.get_file_stream(file_name).await?;
 
     let (encrypted_length, buffered_data) = handle_file_stream(file_data).await?;
 
     // Decrypt the file data
-    let (decrypted_data, was_encrypted) = repo.decrypt_file_data(&buffered_data)
+    let (decrypted_data, was_encrypted) = repo
+        .decrypt_file_data(&buffered_data)
         .map_err(|e| AppError(anyhow::Error::msg(format!("Failed to decrypt file: {e}"))))?;
 
     if was_encrypted {
-        log_info!(TAG, "File decrypted: {} bytes → {} bytes", encrypted_length, decrypted_data.len());
+        log_info!(
+            TAG,
+            "File decrypted: {} bytes → {} bytes",
+            encrypted_length,
+            decrypted_data.len()
+        );
     }
 
     Ok(HttpResponse::Ok()

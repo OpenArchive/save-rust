@@ -1,10 +1,10 @@
-use actix_web::{web, delete, get, post, Responder, HttpResponse};
-use serde_json::json;
+use crate::constants::TAG;
 use crate::error::AppResult;
-use crate::{log_debug, log_error};
 use crate::models::{IntoSnowbirdGroupsWithNames, RequestName, RequestUrl, SnowbirdGroup};
 use crate::repos;
-use crate::constants::{TAG};
+use crate::{log_debug, log_error};
+use actix_web::{delete, get, post, web, HttpResponse, Responder};
+use serde_json::json;
 
 use crate::server::get_backend;
 use crate::utils::create_veilid_cryptokey_from_base64;
@@ -20,7 +20,7 @@ pub fn scope() -> actix_web::Scope {
                 .service(delete_group)
                 .service(get_group)
                 .service(refresh_group)
-                .service(repos::scope())
+                .service(repos::scope()),
         )
 }
 
@@ -30,7 +30,7 @@ async fn delete_group(group_id: web::Path<String>) -> AppResult<impl Responder> 
     let backend = get_backend().await?;
     let group_id = group_id.into_inner();
     let crypto_key = create_veilid_cryptokey_from_base64(&group_id)?;
-    
+
     backend.close_group(crypto_key).await?;
 
     Ok(HttpResponse::Ok().json(json!({})))
@@ -205,24 +205,51 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
         match repo.get_hash_from_dht().await {
             Ok(repo_hash) => {
                 repo_info["repo_hash"] = json!(repo_hash.to_string());
-                
+
                 // Refresh collection hash if needed
-                log_debug!(TAG, "Repo {} has DHT hash {}. Checking if group has it locally.", repo.id(), repo_hash);
+                log_debug!(
+                    TAG,
+                    "Repo {} has DHT hash {}. Checking if group has it locally.",
+                    repo.id(),
+                    repo_hash
+                );
                 if !group.has_hash(&repo_hash).await? {
-                    log_debug!(TAG, "Repo {} collection {} not found locally. Downloading...", repo.id(), repo_hash);
+                    log_debug!(
+                        TAG,
+                        "Repo {} collection {} not found locally. Downloading...",
+                        repo.id(),
+                        repo_hash
+                    );
                     match group.download_hash_from_peers(&repo_hash).await {
                         Ok(_) => {
-                            log_debug!(TAG, "Successfully downloaded collection hash {} for repo {}", repo_hash, repo.id());
+                            log_debug!(
+                                TAG,
+                                "Successfully downloaded collection hash {} for repo {}",
+                                repo_hash,
+                                repo.id()
+                            );
                         }
                         Err(e) => {
-                            log_debug!(TAG, "Error downloading collection hash {} for repo {}: {}", repo_hash, repo.id(), e);
-                            repo_info["error"] = json!(format!("Error downloading collection: {}", e));
+                            log_debug!(
+                                TAG,
+                                "Error downloading collection hash {} for repo {}: {}",
+                                repo_hash,
+                                repo.id(),
+                                e
+                            );
+                            repo_info["error"] =
+                                json!(format!("Error downloading collection: {}", e));
                             refreshed_repos.push(repo_info);
                             continue; // Skip to next repo if download fails
                         }
                     }
                 } else {
-                    log_debug!(TAG, "Repo {} collection {} already local.", repo.id(), repo_hash);
+                    log_debug!(
+                        TAG,
+                        "Repo {} collection {} already local.",
+                        repo.id(),
+                        repo_hash
+                    );
                 }
 
                 // Now that the collection is ensured to be local, list all files in the repo
@@ -235,25 +262,41 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
                         log_debug!(TAG, "Error listing files for repo {} after ensuring collection download: {}", repo.id(), e);
                         // Even if listing fails here, we might have a repo_hash, so continue with empty files.
                         // Or, handle as a more significant error. For now, log and continue.
-                        repo_info["error_listing_files"] = json!(format!("Error listing files post-download: {}", e));
+                        repo_info["error_listing_files"] =
+                            json!(format!("Error listing files post-download: {}", e));
                     }
                 };
                 repo_info["all_files"] = json!(all_files_vec.clone());
-
 
                 // For each file, check if it needs to be refreshed
                 for file_name in &all_files_vec {
                     match repo.get_file_hash(file_name).await {
                         Ok(file_hash) => {
                             if !group.has_hash(&file_hash).await? {
-                                log_debug!(TAG, "File {} hash {} not found locally. Downloading...", file_name, file_hash);
+                                log_debug!(
+                                    TAG,
+                                    "File {} hash {} not found locally. Downloading...",
+                                    file_name,
+                                    file_hash
+                                );
                                 match group.download_hash_from_peers(&file_hash).await {
                                     Ok(_) => {
-                                        log_debug!(TAG, "Successfully downloaded file hash {} for {}", file_hash, file_name);
+                                        log_debug!(
+                                            TAG,
+                                            "Successfully downloaded file hash {} for {}",
+                                            file_hash,
+                                            file_name
+                                        );
                                         refreshed_files_vec.push(file_name.clone());
                                     }
                                     Err(e) => {
-                                        log_debug!(TAG, "Error downloading file {} hash {}: {}", file_name, file_hash, e);
+                                        log_debug!(
+                                            TAG,
+                                            "Error downloading file {} hash {}: {}",
+                                            file_name,
+                                            file_hash,
+                                            e
+                                        );
                                         // Optionally add to a list of files that failed to download
                                     }
                                 }

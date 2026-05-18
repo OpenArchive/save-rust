@@ -1,10 +1,10 @@
-use actix_web::{HttpResponse, ResponseError, error::BlockingError};
+use crate::constants::TAG;
+use crate::log_error;
+use actix_web::{error::BlockingError, HttpResponse, ResponseError};
 use anyhow::anyhow;
 use anyhow::Error as AnyhowError;
 use base64_url::base64;
 use eyre::ErrReport;
-use crate::log_error;
-use crate::constants::TAG;
 
 pub struct AppError(pub AnyhowError);
 
@@ -36,7 +36,8 @@ impl ResponseError for AppError {
         let legacy_body = format!("Something went wrong: {error_msg}");
         if error_msg.contains("Backend not ready")
             || error_msg.contains("not initialized")
-            || error_msg.contains("Initialization") {
+            || error_msg.contains("Initialization")
+        {
             return HttpResponse::ServiceUnavailable().json(legacy_body);
         }
 

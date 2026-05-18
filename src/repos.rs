@@ -3,14 +3,14 @@ use crate::error::{AppError, AppResult};
 use crate::log_debug;
 use crate::media;
 use crate::models::{AsyncFrom, GroupPath, GroupRepoPath, SnowbirdRepo};
-use crate::server::{get_backend, ensure_backend_ready};
+use crate::server::{ensure_backend_ready, get_backend};
 use crate::utils::create_veilid_cryptokey_from_base64;
 use actix_web::{get, post, web, HttpResponse, Responder, Scope};
-use save_dweb_backend::group::Group;
+use anyhow::Result;
 use save_dweb_backend::common::DHTEntity;
+use save_dweb_backend::group::Group;
 use serde::Deserialize;
 use serde_json::json;
-use anyhow::Result;
 
 pub fn scope() -> Scope {
     web::scope("/repos")
@@ -91,7 +91,10 @@ async fn create_repo(
     // The Android UI may still call this endpoint after joining; make it idempotent.
     // Check for existing repo FIRST to avoid error-path issues with get_group cache.
     let repo = if let Some(existing) = group.get_own_repo().await {
-        log_debug!(TAG, "Own repo already exists, returning existing (idempotent)");
+        log_debug!(
+            TAG,
+            "Own repo already exists, returning existing (idempotent)"
+        );
         existing
     } else {
         group.create_repo().await?
