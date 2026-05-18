@@ -92,6 +92,12 @@ mod tests {
         }
     }
 
+    fn deterministic_test_payload(size: usize) -> Vec<u8> {
+        (0..size)
+            .map(|index| ((index * 31 + 17) % 251) as u8)
+            .collect()
+    }
+
     fn apply_test_network_overrides(config: &mut VeilidConfig) {
         if !env_flag("SAVE_VEILID_LOCAL_TEST_MODE") {
             return;
@@ -1353,6 +1359,185 @@ mod tests {
 
         Ok(())
     }
+
+    async fn assert_member_refreshes_owner_upload_after_join(
+        test_name: &str,
+        file_name: &str,
+        file_content: Vec<u8>,
+    ) -> Result<()> {
+        let _ = env_logger::try_init();
+        log::info!("Testing refresh when member joins before owner upload: {test_name}");
+
+        // Create secondary backend (creator) first.
+        let (path2, namespace2) = get_test_config(&format!("{test_name}_secondary")).await;
+        let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
+        let (veilid_api2, update_rx2) = init_veilid_for_tests(
+            path2.to_path_buf().as_path(),
+            namespace2,
+            Duration::from_secs(180),
+        )
+        .await?;
+        let backend2 =
+            Backend::from_dependencies(&path2.to_path_buf(), veilid_api2, update_rx2, store2)
+                .await
+                .unwrap();
+        wait_for_public_internet_ready(&backend2).await?;
+
+        // Initialize main backend (joiner).
+        let _path = init_test_backend(&format!("{test_name}_main")).await?;
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            wait_for_public_internet_ready(&backend).await?;
+        }
+
+        // Owner creates a group and repo, but does not upload until after the member joins.
+        let mut group = backend2.create_group().await?;
+        let join_url = group.get_url()?;
+        group.set_name(TEST_GROUP_NAME).await?;
+        let repo = group.create_repo().await?;
+        repo.set_name(TEST_GROUP_NAME).await?;
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            backend.join_from_url(join_url.as_str()).await?;
+        }
+
+        // Wait until the joiner can see the joined group and at least one repo before upload.
+        let mut metadata_retries = 20;
+        loop {
+            let groups_req = test::TestRequest::get().uri("/api/groups").to_request();
+            let groups_resp: GroupsResponse = test::call_and_read_body_json(&app, groups_req).await;
+            let repos_req = test::TestRequest::get()
+                .uri(&format!("/api/groups/{}/repos", group.id()))
+                .to_request();
+            let repos_resp: ReposResponse = test::call_and_read_body_json(&app, repos_req).await;
+
+            let has_group = groups_resp
+                .groups
+                .iter()
+                .any(|g| g.key == group.id().to_string());
+            if has_group && !repos_resp.repos.is_empty() {
+                break;
+            }
+
+            metadata_retries -= 1;
+            if metadata_retries == 0 {
+                panic!(
+                    "Member did not converge on joined group metadata before upload. groups: {}, repos: {}",
+                    groups_resp.groups.len(),
+                    repos_resp.repos.len(),
+                );
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+
+        repo.upload(file_name, file_content.clone()).await?;
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        let mut refresh_retries = 20;
+        loop {
+            let refresh_req = test::TestRequest::post()
+                .uri(&format!("/api/groups/{}/refresh", group.id()))
+                .to_request();
+            let refresh_resp = test::call_service(&app, refresh_req).await;
+            let refresh_status = refresh_resp.status();
+
+            if refresh_status.is_success() {
+                let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
+                let repo_id_with_file = refresh_data["repos"].as_array().and_then(|repos| {
+                    repos.iter().find_map(|repo| {
+                        let has_file = repo["all_files"]
+                            .as_array()
+                            .map(|files| files.iter().any(|f| f.as_str() == Some(file_name)))
+                            .unwrap_or(false);
+                        if has_file {
+                            repo["repo_id"].as_str().map(ToOwned::to_owned)
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+                if let Some(repo_id) = repo_id_with_file {
+                    let get_file_req = test::TestRequest::get()
+                        .uri(&format!(
+                            "/api/groups/{}/repos/{}/media/{}",
+                            group.id(),
+                            repo_id,
+                            file_name
+                        ))
+                        .to_request();
+                    let get_file_resp = test::call_service(&app, get_file_req).await;
+                    if get_file_resp.status().is_success() {
+                        let got_content = test::read_body(get_file_resp).await;
+                        assert_eq!(
+                            got_content.to_vec(),
+                            file_content,
+                            "Downloaded file should match uploaded bytes"
+                        );
+                        break;
+                    }
+                }
+            } else {
+                let body = test::read_body(refresh_resp).await;
+                let body_text = String::from_utf8_lossy(&body).to_string();
+                let is_retryable = body_text.contains("couldn't look up relay")
+                    || body_text.contains("Unable to open group DHT record")
+                    || body_text.contains("Group not found:")
+                    || body_text.contains("Unable to download hash");
+                if !is_retryable {
+                    panic!(
+                        "Refresh failed with non-retryable error. status={refresh_status}, body={body_text}"
+                    );
+                }
+            }
+
+            refresh_retries -= 1;
+            if refresh_retries == 0 {
+                panic!("Member did not refresh and download owner upload after 20 attempts.");
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+
+        backend2.stop().await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        cleanup_test_resources().await?;
+
+        Ok(())
+    }
+
+    #[actix_web::test]
+    #[serial]
+    async fn test_refresh_member_joined_before_owner_uploads() -> Result<()> {
+        assert_member_refreshes_owner_upload_after_join(
+            "test_refresh_member_joined_before_upload",
+            "member-joined-before-upload-16k.bin",
+            deterministic_test_payload(16 * 1024),
+        )
+        .await
+    }
+
+    #[actix_web::test]
+    #[serial]
+    #[ignore = "manual large-transfer coverage; 320 KiB is currently flaky on local Veilid/Iroh tunnels"]
+    async fn test_refresh_member_joined_before_owner_uploads_320k_file() -> Result<()> {
+        assert_member_refreshes_owner_upload_after_join(
+            "test_refresh_member_joined_before_upload_320k",
+            "member-joined-before-upload-320k.bin",
+            deterministic_test_payload(320 * 1024),
+        )
+        .await
+    }
+
     #[actix_web::test]
     #[serial]
     async fn test_health_endpoint() -> Result<()> {
