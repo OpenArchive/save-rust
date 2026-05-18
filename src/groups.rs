@@ -176,13 +176,25 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
         let mut all_files_vec: Vec<String> = Vec::new();
 
         if repo.can_write() {
-            match repo.get_hash_from_dht().await {
-                Ok(repo_hash) => {
+            match tokio::time::timeout(std::time::Duration::from_secs(2), repo.get_hash_from_dht())
+                .await
+            {
+                Ok(Ok(repo_hash)) => {
                     repo_info["repo_hash"] = json!(repo_hash.to_string());
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     log_debug!(TAG, "Error getting repo hash for {}: {}", repo.id(), e);
-                    repo_info["error"] = json!(format!("Error getting repo hash from DHT: {}", e));
+                    repo_info["repo_hash_error"] =
+                        json!(format!("Error getting repo hash from DHT: {}", e));
+                }
+                Err(_) => {
+                    log_debug!(
+                        TAG,
+                        "Timed out getting optional writable repo hash for {}",
+                        repo.id()
+                    );
+                    repo_info["repo_hash_error"] =
+                        json!("Timed out getting optional writable repo hash from DHT");
                 }
             }
 
@@ -212,8 +224,10 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
         }
 
         // Get current repo hash and collection info
-        match repo.get_hash_from_dht().await {
-            Ok(repo_hash) => {
+        match tokio::time::timeout(std::time::Duration::from_secs(30), repo.get_hash_from_dht())
+            .await
+        {
+            Ok(Ok(repo_hash)) => {
                 repo_info["repo_hash"] = json!(repo_hash.to_string());
 
                 // Refresh collection hash if needed
@@ -319,9 +333,13 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
                 }
                 repo_info["refreshed_files"] = json!(refreshed_files_vec);
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 log_debug!(TAG, "Error getting repo hash for {}: {}", repo.id(), e);
                 repo_info["error"] = json!(format!("Error getting repo hash from DHT: {}", e));
+            }
+            Err(_) => {
+                log_debug!(TAG, "Timed out getting repo hash for {}", repo.id());
+                repo_info["error"] = json!("Timed out getting repo hash from DHT");
             }
         }
 
