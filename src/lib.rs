@@ -150,9 +150,9 @@ mod tests {
     }
 
     fn format_size(size: usize) -> String {
-        if size % (1024 * 1024) == 0 {
+        if size.is_multiple_of(1024 * 1024) {
             format!("{}MiB", size / (1024 * 1024))
-        } else if size % 1024 == 0 {
+        } else if size.is_multiple_of(1024) {
             format!("{}KiB", size / 1024)
         } else {
             format!("{size}B")
