@@ -1,12 +1,12 @@
 #![allow(clippy::result_large_err)] // Allows for larger error types in Result
 
+use jni::objects::{GlobalRef, JClass};
+use jni::AttachGuard;
+use jni::JNIEnv;
+use jni::JavaVM;
+use once_cell::sync::Lazy;
 use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex, Once};
-use jni::AttachGuard;
-use jni::JavaVM;
-use jni::objects::{GlobalRef, JClass};
-use jni::JNIEnv;
-use once_cell::sync::Lazy;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -35,7 +35,11 @@ static INIT: Once = Once::new();
 pub fn get_java_vm() -> JniResult<JavaVM> {
     let jvm_locked = JAVA_VM.lock();
     let jvm = jvm_locked.as_ref().unwrap();
-    let env = jvm.as_ref().unwrap().attach_current_thread_as_daemon().unwrap();
+    let env = jvm
+        .as_ref()
+        .unwrap()
+        .attach_current_thread_as_daemon()
+        .unwrap();
     let vm = env.get_java_vm();
     return Ok(vm?);
 }
@@ -52,15 +56,15 @@ pub fn init_jni(env: &JNIEnv, class: JClass) -> JniResult<()> {
 fn init_jni_inner(env: &JNIEnv, class: JClass) -> JniResult<()> {
     let java_vm = env.get_java_vm()?;
     let global_class = env.new_global_ref(class)?;
-    
-    *JAVA_VM.lock()
-        .map_err(|e| JniError::InitializationError(format!("Failed to acquire JavaVM lock: {e}")))?
-        = Some(java_vm);
-    
-    *CLASS.lock()
-        .map_err(|e| JniError::InitializationError(format!("Failed to acquire class lock: {e}")))?
-        = Some(global_class);
-    
+
+    *JAVA_VM.lock().map_err(|e| {
+        JniError::InitializationError(format!("Failed to acquire JavaVM lock: {e}"))
+    })? = Some(java_vm);
+
+    *CLASS.lock().map_err(|e| {
+        JniError::InitializationError(format!("Failed to acquire class lock: {e}"))
+    })? = Some(global_class);
+
     Ok(())
 }
 
@@ -77,10 +81,12 @@ pub fn with_class<F, R>(f: F) -> JniResult<R>
 where
     F: FnOnce(&GlobalRef) -> JniResult<R>,
 {
-    let class_guard = CLASS.lock()
+    let class_guard = CLASS
+        .lock()
         .map_err(|_| JniError::InitializationError("Failed to acquire class lock".into()))?;
-    
-    let class = class_guard.as_ref()
+
+    let class = class_guard
+        .as_ref()
         .ok_or_else(|| JniError::InitializationError("Class not initialized".into()))?;
 
     f(class)
@@ -99,13 +105,16 @@ pub fn with_env<F, R>(f: F) -> JniResult<R>
 where
     F: FnOnce(AttachGuard) -> JniResult<R>,
 {
-    let vm_guard = JAVA_VM.lock()
+    let vm_guard = JAVA_VM
+        .lock()
         .map_err(|e| JniError::ThreadAttachError(format!("Failed to acquire JavaVM lock: {e}")))?;
-    
-    let vm = vm_guard.as_ref()
+
+    let vm = vm_guard
+        .as_ref()
         .ok_or_else(|| JniError::InitializationError("JavaVM not initialized".into()))?;
 
-    let env = vm.attach_current_thread()
+    let env = vm
+        .attach_current_thread()
         .map_err(|e| JniError::ThreadAttachError(format!("Failed to attach thread: {e}")))?;
 
     f(env)

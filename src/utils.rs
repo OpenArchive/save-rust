@@ -1,7 +1,7 @@
+use crate::error::AppResult;
 use base64_url;
 use std::convert::TryInto;
-use veilid_core::{RecordKey, BareRecordKey, BareOpaqueRecordKey, CRYPTO_KIND_VLD0};
-use crate::error::AppResult;
+use veilid_core::{BareOpaqueRecordKey, BareRecordKey, RecordKey, CRYPTO_KIND_VLD0};
 
 /// Parse a RecordKey from either:
 /// - Typed format: "VLD0:base64_key:base64_hash" (from RecordKey::to_string())
@@ -18,12 +18,12 @@ pub fn create_veilid_cryptokey_from_base64(key_string: &str) -> AppResult<Record
 
     // Legacy: raw base64 format
     let key_vec = base64_url::decode(key_string)?;
-    let key_array: [u8; 32] = key_vec.try_into().map_err(|_| {
-        anyhow::anyhow!("Invalid key length: expected 32 bytes")
-    })?;
+    let key_array: [u8; 32] = key_vec
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid key length: expected 32 bytes"))?;
     let record_key = RecordKey::new(
         CRYPTO_KIND_VLD0,
-        BareRecordKey::new(BareOpaqueRecordKey::from(&key_array[..]), None)
+        BareRecordKey::new(BareOpaqueRecordKey::from(&key_array[..]), None),
     );
 
     Ok(record_key)

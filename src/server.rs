@@ -14,17 +14,17 @@ use save_dweb_backend::backend::Backend;
 use serde::Deserialize;
 use serde_json::json;
 use std::net::Ipv4Addr;
-use std::time::{Duration, Instant};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use std::{env, panic};
 use thiserror::Error;
 
+use crate::actix_route_dumper::RouteDumper;
+use crate::models::SnowbirdGroup;
 #[cfg(test)]
 use std::sync::RwLock;
 use veilid_core::VeilidUpdate;
-use crate::actix_route_dumper::RouteDumper;
-use crate::models::SnowbirdGroup;
 
 #[derive(Error, Debug)]
 pub enum BackendError {
@@ -53,7 +53,9 @@ pub async fn get_backend() -> Result<Arc<Backend>, anyhow::Error> {
     }
     #[cfg(test)]
     {
-        let backend_lock = BACKEND.read().map_err(|e| anyhow!("Failed to read backend lock: {e}"))?;
+        let backend_lock = BACKEND
+            .read()
+            .map_err(|e| anyhow!("Failed to read backend lock: {e}"))?;
         match backend_lock.as_ref() {
             Some(backend) => Ok(Arc::clone(backend)),
             None => Err(anyhow!("Backend not initialized")),
@@ -63,14 +65,18 @@ pub async fn get_backend() -> Result<Arc<Backend>, anyhow::Error> {
 
 #[cfg(test)]
 pub fn set_backend(backend: Arc<Backend>) -> Result<()> {
-    let mut backend_lock = BACKEND.write().map_err(|e| anyhow!("Failed to write backend lock: {e}"))?;
+    let mut backend_lock = BACKEND
+        .write()
+        .map_err(|e| anyhow!("Failed to write backend lock: {e}"))?;
     *backend_lock = Some(backend);
     Ok(())
 }
 
 #[cfg(test)]
 pub fn clear_backend() -> Result<()> {
-    let mut backend_lock = BACKEND.write().map_err(|e| anyhow!("Failed to write backend lock: {e}"))?;
+    let mut backend_lock = BACKEND
+        .write()
+        .map_err(|e| anyhow!("Failed to write backend lock: {e}"))?;
     *backend_lock = None;
     Ok(())
 }
@@ -125,16 +131,16 @@ async fn health_ready() -> AppResult<impl Responder> {
 
 #[derive(Deserialize)]
 struct JoinGroupRequest {
-    uri: String
+    uri: String,
 }
 
 #[post("memberships")]
 async fn join_group(body: web::Json<JoinGroupRequest>) -> AppResult<impl Responder> {
     let join_request_data = body.into_inner();
-    
+
     // Ensure backend is fully initialized before proceeding
     ensure_backend_ready().await?;
-    
+
     let backend = get_backend().await?;
     let boxed_group = backend.join_from_url(&join_request_data.uri).await?;
     let snowbird_group: SnowbirdGroup = boxed_group.as_ref().into();
@@ -162,7 +168,11 @@ fn get_optimal_worker_count() -> usize {
             log_info!(TAG, "Using SAVE_WORKER_COUNT={} (override)", worker_count);
             return worker_count;
         } else {
-            log_error!(TAG, "Invalid SAVE_WORKER_COUNT value: {}, using default", worker_count_str);
+            log_error!(
+                TAG,
+                "Invalid SAVE_WORKER_COUNT value: {}, using default",
+                worker_count_str
+            );
         }
     }
 
@@ -173,7 +183,11 @@ fn get_optimal_worker_count() -> usize {
 }
 
 pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> anyhow::Result<()> {
-    log_debug!(TAG, "start_server: Using socket path: {:?}", server_socket_path);
+    log_debug!(
+        TAG,
+        "start_server: Using socket path: {:?}",
+        server_socket_path
+    );
 
     let worker_count = get_optimal_worker_count();
 
@@ -231,15 +245,15 @@ pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> an
     let web_server = HttpServer::new(move || {
         let app_start = Instant::now();
         let app = App::new()
-        .wrap(RouteDumper::new(actix_log))
-        .service(status)
-        .service(health)
-        .service(health_ready)
-        .service(
-            web::scope("/api")
-                .service(join_group)
-                .service(groups::scope())
-        );
+            .wrap(RouteDumper::new(actix_log))
+            .service(status)
+            .service(health)
+            .service(health_ready)
+            .service(
+                web::scope("/api")
+                    .service(join_group)
+                    .service(groups::scope()),
+            );
         log_perf("Web server app created", app_start.elapsed());
         app
     })
@@ -250,7 +264,7 @@ pub async fn start(backend_base_directory: &str, server_socket_path: &str) -> an
 
     log_perf("Web server initialized", start_instant.elapsed());
     log_info!(TAG, "Starting web server...");
-    
+
     let server_future = web_server.run();
     log_perf("Web server started", start_instant.elapsed());
 

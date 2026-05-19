@@ -25,20 +25,20 @@ mod tests {
     use super::*;
     use actix_web::{test, web, App};
     use anyhow::Result;
+    use base64_url::base64;
+    use base64_url::base64::Engine;
     use models::{RequestName, RequestUrl, SnowbirdFile, SnowbirdGroup, SnowbirdRepo};
+    use save_dweb_backend::backend::Backend;
     use save_dweb_backend::{common::DHTEntity, constants::TEST_GROUP_NAME};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use server::{status, health, set_backend, clear_backend};
+    use serial_test::serial;
+    use server::{clear_backend, health, set_backend, status};
+    use std::sync::Arc;
     use tmpdir::TmpDir;
-    use base64_url::base64;
-    use base64_url::base64::Engine;
-    use save_dweb_backend::backend::Backend;
+    use tokio::sync::broadcast;
     use veilid_core::VeilidConfig;
     use veilid_core::VeilidUpdate;
-    use serial_test::serial;
-    use std::sync::Arc;
-    use tokio::sync::broadcast;
 
     #[derive(Debug, Serialize, Deserialize)]
     struct GroupsResponse {
@@ -92,6 +92,90 @@ mod tests {
         }
     }
 
+    fn deterministic_test_payload(size: usize) -> Vec<u8> {
+        (0..size)
+            .map(|index| ((index * 31 + 17) % 251) as u8)
+            .collect()
+    }
+
+    fn parse_size_token(token: &str) -> Option<usize> {
+        let normalized = token.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            return None;
+        }
+
+        let units = [
+            ("kib", 1024usize),
+            ("kb", 1024usize),
+            ("k", 1024usize),
+            ("mib", 1024usize * 1024),
+            ("mb", 1024usize * 1024),
+            ("m", 1024usize * 1024),
+        ];
+
+        for (suffix, multiplier) in units {
+            if let Some(value) = normalized.strip_suffix(suffix) {
+                return value
+                    .trim()
+                    .parse::<usize>()
+                    .ok()
+                    .map(|size| size * multiplier);
+            }
+        }
+
+        normalized.parse::<usize>().ok()
+    }
+
+    fn diagnostic_file_size_sweep() -> Vec<usize> {
+        if let Ok(value) = env::var("SAVE_FILE_SIZE_SWEEP_BYTES") {
+            let sizes: Vec<usize> = value
+                .split(',')
+                .filter_map(parse_size_token)
+                .filter(|size| *size > 0)
+                .collect();
+            if !sizes.is_empty() {
+                return sizes;
+            }
+        }
+
+        vec![
+            16 * 1024,
+            64 * 1024,
+            128 * 1024,
+            256 * 1024,
+            320 * 1024,
+            512 * 1024,
+            1024 * 1024,
+        ]
+    }
+
+    fn format_size(size: usize) -> String {
+        if size.is_multiple_of(1024 * 1024) {
+            format!("{}MiB", size / (1024 * 1024))
+        } else if size.is_multiple_of(1024) {
+            format!("{}KiB", size / 1024)
+        } else {
+            format!("{size}B")
+        }
+    }
+
+    fn classify_transfer_failure(body: &str) -> &'static str {
+        if body.contains("Timed out getting repo hash")
+            || body.contains("Unable to get DHT value for repo root hash")
+        {
+            "repo_hash_dht"
+        } else if body.contains("Error downloading collection") {
+            "collection_blob_transfer"
+        } else if body.contains("Unable to download hash")
+            || body.contains("Tunnel closed")
+            || body.contains("Unable to read Timeout")
+        {
+            "file_blob_transfer"
+        } else {
+            "unknown"
+        }
+    }
+
     fn apply_test_network_overrides(config: &mut VeilidConfig) {
         if !env_flag("SAVE_VEILID_LOCAL_TEST_MODE") {
             return;
@@ -121,7 +205,8 @@ mod tests {
         namespace: String,
         ready_timeout: Duration,
     ) -> anyhow::Result<(veilid_core::VeilidAPI, broadcast::Receiver<VeilidUpdate>)> {
-        let mut config = save_dweb_backend::common::config_for_dir(base_dir.to_path_buf(), namespace);
+        let mut config =
+            save_dweb_backend::common::config_for_dir(base_dir.to_path_buf(), namespace);
         apply_test_network_overrides(&mut config);
 
         let (tx, mut rx) = broadcast::channel(32);
@@ -145,7 +230,9 @@ mod tests {
                     }
                 }
             }
-            Err(anyhow::anyhow!("Update channel closed before network ready"))
+            Err(anyhow::anyhow!(
+                "Update channel closed before network ready"
+            ))
         })
         .await
         .map_err(|_| anyhow::anyhow!("Timeout waiting for Veilid network to become ready"))??;
@@ -157,24 +244,19 @@ mod tests {
     async fn init_test_backend(test_name: &str) -> Result<TmpDir> {
         // Clear any previous backend
         clear_backend()?;
-        
+
         let (path, namespace) = get_test_config(test_name).await;
 
         let store = iroh_blobs::store::fs::Store::load(path.to_path_buf().join("iroh")).await?;
         let (veilid_api, update_rx) =
             init_veilid_for_tests(&path.to_path_buf(), namespace, Duration::from_secs(180)).await?;
 
-        let backend = Backend::from_dependencies(
-            &path.to_path_buf(),
-            veilid_api,
-            update_rx,
-            store,
-        )
-        .await?;
-        
+        let backend =
+            Backend::from_dependencies(&path.to_path_buf(), veilid_api, update_rx, store).await?;
+
         // Set the BACKEND static so routes can access it
         set_backend(Arc::new(backend))?;
-        
+
         Ok(path)
     }
 
@@ -205,7 +287,9 @@ mod tests {
                     }
                 }
             }
-            Err(anyhow::anyhow!("Update channel closed before readiness observed"))
+            Err(anyhow::anyhow!(
+                "Update channel closed before readiness observed"
+            ))
         })
         .await
         {
@@ -221,13 +305,13 @@ mod tests {
         if let Ok(backend) = get_backend().await {
             backend.stop().await?;
         }
-        
+
         // Clear the backend static
         clear_backend()?;
-        
+
         // Add a small delay to ensure everything is cleaned up
         tokio::time::sleep(Duration::from_millis(500)).await;
-        
+
         Ok(())
     }
 
@@ -270,7 +354,8 @@ mod tests {
                         break;
                     }
                     Err(e) => {
-                        last_create_group_error = format!("invalid success payload: {e}; body={body:?}");
+                        last_create_group_error =
+                            format!("invalid success payload: {e}; body={body:?}");
                     }
                 }
             } else {
@@ -377,8 +462,6 @@ mod tests {
         let list_files_resp: FilesResponse =
             test::call_and_read_body_json(&app, list_files_req).await;
 
-
-
         // Now check if the response is an array directly
         let files_array = list_files_resp.files;
         assert_eq!(files_array.len(), 1, "There should be one file in the repo");
@@ -450,17 +533,16 @@ mod tests {
         // Initialize secondary backend with unique namespace
         let (path2, namespace2) = get_test_config("test_join_group_secondary").await;
         let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
-        let (veilid_api2, update_rx2) =
-            init_veilid_for_tests(path2.to_path_buf().as_path(), namespace2, Duration::from_secs(180))
-                .await?;
-        let backend2 = Backend::from_dependencies(
-            &path2.to_path_buf(),
-            veilid_api2,
-            update_rx2,
-            store2,
+        let (veilid_api2, update_rx2) = init_veilid_for_tests(
+            path2.to_path_buf().as_path(),
+            namespace2,
+            Duration::from_secs(180),
         )
-        .await
-        .unwrap();
+        .await?;
+        let backend2 =
+            Backend::from_dependencies(&path2.to_path_buf(), veilid_api2, update_rx2, store2)
+                .await
+                .unwrap();
 
         // Wait for backend2 (creator) to be ready
         wait_for_public_internet_ready(&backend2).await?;
@@ -494,7 +576,10 @@ mod tests {
 
         // Group name may not have propagated via DHT yet — the refresh loop below validates it.
         if joined_group.name.as_deref() != Some(TEST_GROUP_NAME) {
-            log::warn!("Group name not yet propagated at join time (got {:?}), will verify after refresh", joined_group.name);
+            log::warn!(
+                "Group name not yet propagated at join time (got {:?}), will verify after refresh",
+                joined_group.name
+            );
         }
 
         // Retry with refresh (cache-invalidating) until DHT propagation converges —
@@ -517,10 +602,7 @@ mod tests {
                 let writable_repos: Vec<_> = resp.repos.iter().filter(|r| r.can_write).collect();
                 let creator_ok = read_only_repos.iter().any(|r| r.name == TEST_GROUP_NAME);
 
-                if read_only_repos.len() == 1
-                    && writable_repos.len() == 1
-                    && creator_ok
-                {
+                if read_only_repos.len() == 1 && writable_repos.len() == 1 && creator_ok {
                     break;
                 }
             }
@@ -548,17 +630,16 @@ mod tests {
         // Create secondary backend (creator) first
         let (path2, namespace2) = get_test_config("test_replicate_group_secondary").await;
         let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
-        let (veilid_api2, update_rx2) =
-            init_veilid_for_tests(path2.to_path_buf().as_path(), namespace2, Duration::from_secs(180))
-                .await?;
-        let backend2 = Backend::from_dependencies(
-            &path2.to_path_buf(),
-            veilid_api2,
-            update_rx2,
-            store2,
+        let (veilid_api2, update_rx2) = init_veilid_for_tests(
+            path2.to_path_buf().as_path(),
+            namespace2,
+            Duration::from_secs(180),
         )
-        .await
-        .unwrap();
+        .await?;
+        let backend2 =
+            Backend::from_dependencies(&path2.to_path_buf(), veilid_api2, update_rx2, store2)
+                .await
+                .unwrap();
 
         // Initialize main backend (joiner)
         let _path = init_test_backend("test_replicate_group_main").await?;
@@ -666,9 +747,7 @@ mod tests {
 
             download_retries -= 1;
             if download_retries == 0 {
-                panic!(
-                    "File download did not converge after retries. last status: {resp_status}"
-                );
+                panic!("File download did not converge after retries. last status: {resp_status}");
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
@@ -705,7 +784,10 @@ mod tests {
             .uri(&format!("/api/groups/{fake_group_id}/refresh"))
             .to_request();
         let non_existent_resp = test::call_service(&app, non_existent_req).await;
-        assert!(non_existent_resp.status().is_client_error(), "Should return error for non-existent group");
+        assert!(
+            non_existent_resp.status().is_client_error(),
+            "Should return error for non-existent group"
+        );
 
         // Clean up
         cleanup_test_resources().await?;
@@ -743,7 +825,10 @@ mod tests {
             .uri(&format!("/api/groups/{}/refresh", empty_group.id()))
             .to_request();
         let empty_group_resp = test::call_service(&app, empty_group_req).await;
-        assert!(empty_group_resp.status().is_success(), "Should handle empty group");
+        assert!(
+            empty_group_resp.status().is_success(),
+            "Should handle empty group"
+        );
         let empty_group_data: serde_json::Value = test::read_body_json(empty_group_resp).await;
         assert_eq!(empty_group_data["status"], "success");
         assert!(empty_group_data["repos"].as_array().unwrap().is_empty());
@@ -768,26 +853,27 @@ mod tests {
         let (group, repo, dummy_file_name, dummy_file_content) = {
             use server::get_backend;
             let backend = get_backend().await?;
-            
+
             // Wait for public internet readiness
             log::info!("Waiting for public internet readiness...");
             wait_for_public_internet_ready(&backend).await?;
             log::info!("Public internet is ready");
-            
+
             let mut group = backend.create_group().await?;
             group.set_name(TEST_GROUP_NAME).await?;
             log::info!("Created group with name: {TEST_GROUP_NAME}");
-            
+
             let repo = group.create_repo().await?;
             repo.set_name("Test Repo").await?;
             log::info!("Created repo with name: Test Repo");
-            
+
             // Upload a dummy file to ensure the repo has a collection/hash
             let dummy_file_name = "dummy.txt";
             let dummy_file_content = b"dummy content".to_vec();
-            repo.upload(dummy_file_name, dummy_file_content.clone()).await?;
+            repo.upload(dummy_file_name, dummy_file_content.clone())
+                .await?;
             log::info!("Uploaded dummy file: {dummy_file_name}");
-            
+
             (group, repo, dummy_file_name, dummy_file_content)
         };
 
@@ -805,50 +891,80 @@ mod tests {
             .uri(&format!("/api/groups/{}/refresh", group.id()))
             .to_request();
         let refresh_resp = test::call_service(&app, refresh_req).await;
-        
+
         // Verify response status
-        assert!(refresh_resp.status().is_success(), 
-            "Refresh should succeed, got status: {}", refresh_resp.status());
-        
+        assert!(
+            refresh_resp.status().is_success(),
+            "Refresh should succeed, got status: {}",
+            refresh_resp.status()
+        );
+
         // Parse and verify response data
         let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
         log::info!("Refresh response: {refresh_data:?}");
-        
-        assert_eq!(refresh_data["status"], "success", "Response should indicate success");
-        
+
+        assert_eq!(
+            refresh_data["status"], "success",
+            "Response should indicate success"
+        );
+
         // Verify repos array
-        let repos = refresh_data["repos"].as_array()
+        let repos = refresh_data["repos"]
+            .as_array()
             .expect("repos should be an array in response");
         assert_eq!(repos.len(), 1, "Should have exactly one repo");
-        
+
         // Verify repo details
         let repo_data = &repos[0];
-        assert!(repo_data["can_write"].as_bool().unwrap(), "repo should be writable");
-        assert!(repo_data["repo_hash"].is_string(), "repo should have a hash");
+        assert!(
+            repo_data["can_write"].as_bool().unwrap(),
+            "repo should be writable"
+        );
+        assert!(
+            repo_data["repo_hash"].is_string(),
+            "repo should have a hash"
+        );
         assert_eq!(repo_data["name"], "Test Repo", "repo name should match");
-        
+
         // Verify refreshed files
-        let refreshed_files = repo_data["refreshed_files"].as_array()
+        let refreshed_files = repo_data["refreshed_files"]
+            .as_array()
             .expect("refreshed_files should be an array");
-        assert!(refreshed_files.is_empty(), "No files should be refreshed since all are present");
+        assert!(
+            refreshed_files.is_empty(),
+            "No files should be refreshed since all are present"
+        );
 
         // Verify all_files contains the uploaded file
-        let all_files = repo_data["all_files"].as_array().expect("all_files should be an array");
+        let all_files = repo_data["all_files"]
+            .as_array()
+            .expect("all_files should be an array");
         assert_eq!(all_files.len(), 1, "Should have one file in all_files");
-        assert_eq!(all_files[0], dummy_file_name, "all_files should contain the uploaded file");
+        assert_eq!(
+            all_files[0], dummy_file_name,
+            "all_files should contain the uploaded file"
+        );
 
         // Verify file is accessible after refresh
         let get_file_req = test::TestRequest::get()
             .uri(&format!(
                 "/api/groups/{}/repos/{}/media/{}",
-                group.id(), repo.id(), dummy_file_name
+                group.id(),
+                repo.id(),
+                dummy_file_name
             ))
             .to_request();
         let get_file_resp = test::call_service(&app, get_file_req).await;
-        assert!(get_file_resp.status().is_success(), "File should be accessible after refresh");
+        assert!(
+            get_file_resp.status().is_success(),
+            "File should be accessible after refresh"
+        );
         let got_content = test::read_body(get_file_resp).await;
-        assert_eq!(got_content.to_vec(), dummy_file_content,
-            "File content should match after refresh");
+        assert_eq!(
+            got_content.to_vec(),
+            dummy_file_content,
+            "File content should match after refresh"
+        );
 
         // Clean up
         log::info!("Cleaning up test resources...");
@@ -899,26 +1015,47 @@ mod tests {
         assert!(refresh_resp.status().is_success(), "Refresh should succeed");
         let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
         assert_eq!(refresh_data["status"], "success");
-        let repos = refresh_data["repos"].as_array().expect("repos should be an array");
+        let repos = refresh_data["repos"]
+            .as_array()
+            .expect("repos should be an array");
         assert_eq!(repos.len(), 1, "Should have one repo");
         let repo_data = &repos[0];
-        let refreshed_files = repo_data["refreshed_files"].as_array().expect("refreshed_files should be an array");
-        assert!(refreshed_files.is_empty(), "No files should be refreshed since all are present");
-        let all_files = repo_data["all_files"].as_array().expect("all_files should be an array");
+        let refreshed_files = repo_data["refreshed_files"]
+            .as_array()
+            .expect("refreshed_files should be an array");
+        assert!(
+            refreshed_files.is_empty(),
+            "No files should be refreshed since all are present"
+        );
+        let all_files = repo_data["all_files"]
+            .as_array()
+            .expect("all_files should be an array");
         assert_eq!(all_files.len(), 1, "Should have one file in all_files");
-        assert_eq!(all_files[0], file_name, "all_files should contain the uploaded file");
+        assert_eq!(
+            all_files[0], file_name,
+            "all_files should contain the uploaded file"
+        );
 
         // Verify file is accessible
         let get_file_req = test::TestRequest::get()
             .uri(&format!(
                 "/api/groups/{}/repos/{}/media/{}",
-                group.id(), repo.id(), file_name
+                group.id(),
+                repo.id(),
+                file_name
             ))
             .to_request();
         let get_file_resp = test::call_service(&app, get_file_req).await;
-        assert!(get_file_resp.status().is_success(), "File should be accessible");
+        assert!(
+            get_file_resp.status().is_success(),
+            "File should be accessible"
+        );
         let got_content = test::read_body(get_file_resp).await;
-        assert_eq!(got_content.to_vec(), file_content.to_vec(), "File content should match");
+        assert_eq!(
+            got_content.to_vec(),
+            file_content.to_vec(),
+            "File content should match"
+        );
 
         // Clean up
         cleanup_test_resources().await?;
@@ -976,7 +1113,9 @@ mod tests {
         let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
         assert_eq!(refresh_data["status"], "success");
 
-        let repos = refresh_data["repos"].as_array().expect("repos should be an array");
+        let repos = refresh_data["repos"]
+            .as_array()
+            .expect("repos should be an array");
         assert!(!repos.is_empty(), "Group B should have at least one repo");
 
         // Aggregate all files reported by refresh for group B.
@@ -1032,17 +1171,16 @@ mod tests {
         // Create secondary backend (creator) first
         let (path2, namespace2) = get_test_config("test_refresh_joined_secondary").await;
         let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
-        let (veilid_api2, update_rx2) =
-            init_veilid_for_tests(path2.to_path_buf().as_path(), namespace2, Duration::from_secs(180))
-                .await?;
-        let backend2 = Backend::from_dependencies(
-            &path2.to_path_buf(),
-            veilid_api2,
-            update_rx2,
-            store2,
+        let (veilid_api2, update_rx2) = init_veilid_for_tests(
+            path2.to_path_buf().as_path(),
+            namespace2,
+            Duration::from_secs(180),
         )
-        .await
-        .unwrap();
+        .await?;
+        let backend2 =
+            Backend::from_dependencies(&path2.to_path_buf(), veilid_api2, update_rx2, store2)
+                .await
+                .unwrap();
 
         // Wait for backend2 (creator) to be network-ready
         log::info!("Waiting for backend2 (creator) public internet readiness...");
@@ -1186,10 +1324,18 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(5)).await;
         };
 
-        assert_eq!(refresh_data["status"], "success", "First refresh status should be success");
+        assert_eq!(
+            refresh_data["status"], "success",
+            "First refresh status should be success"
+        );
 
-        let repos = refresh_data["repos"].as_array().expect("repos should be an array");
-        assert!(!repos.is_empty(), "Should have at least one repo after joining");
+        let repos = refresh_data["repos"]
+            .as_array()
+            .expect("repos should be an array");
+        assert!(
+            !repos.is_empty(),
+            "Should have at least one repo after joining"
+        );
 
         let repo_data = repos
             .iter()
@@ -1205,7 +1351,8 @@ mod tests {
             .expect("repo_id should be a string")
             .to_string();
 
-        let refreshed_files = repo_data["refreshed_files"].as_array()
+        let refreshed_files = repo_data["refreshed_files"]
+            .as_array()
             .expect("refreshed_files should be an array");
         assert!(
             refreshed_files.is_empty()
@@ -1214,35 +1361,56 @@ mod tests {
             "First refresh should report either no-op or one refreshed expected file, got {refreshed_files:?}"
         );
 
-        let all_files = repo_data["all_files"].as_array().expect("all_files should be an array");
+        let all_files = repo_data["all_files"]
+            .as_array()
+            .expect("all_files should be an array");
         assert_eq!(all_files.len(), 1, "Should have one file in all_files");
-        assert_eq!(all_files[0].as_str().unwrap(), file_name,
-            "all_files should contain the uploaded file");
+        assert_eq!(
+            all_files[0].as_str().unwrap(),
+            file_name,
+            "all_files should contain the uploaded file"
+        );
 
         // Verify file is accessible after refresh
         let get_file_req = test::TestRequest::get()
             .uri(&format!(
                 "/api/groups/{}/repos/{}/media/{}",
-                group.id(), refreshed_repo_id, file_name
+                group.id(),
+                refreshed_repo_id,
+                file_name
             ))
             .to_request();
         let get_file_resp = test::call_service(&app, get_file_req).await;
-        assert!(get_file_resp.status().is_success(), "File should be accessible after refresh");
+        assert!(
+            get_file_resp.status().is_success(),
+            "File should be accessible after refresh"
+        );
         let got_content = test::read_body(get_file_resp).await;
-        assert_eq!(got_content.to_vec(), file_content.to_vec(), 
-            "File content should match after refresh");
+        assert_eq!(
+            got_content.to_vec(),
+            file_content.to_vec(),
+            "File content should match after refresh"
+        );
 
         // Test second refresh - should be no-op since all files are present
         let refresh_req2 = test::TestRequest::post()
             .uri(&format!("/api/groups/{}/refresh", group.id()))
             .to_request();
         let refresh_resp2 = test::call_service(&app, refresh_req2).await;
-        assert!(refresh_resp2.status().is_success(), "Second refresh should succeed");
-        
+        assert!(
+            refresh_resp2.status().is_success(),
+            "Second refresh should succeed"
+        );
+
         let refresh_data2: serde_json::Value = test::read_body_json(refresh_resp2).await;
-        assert_eq!(refresh_data2["status"], "success", "Second refresh status should be success");
-        
-        let repos2 = refresh_data2["repos"].as_array().expect("repos should be an array");
+        assert_eq!(
+            refresh_data2["status"], "success",
+            "Second refresh status should be success"
+        );
+
+        let repos2 = refresh_data2["repos"]
+            .as_array()
+            .expect("repos should be an array");
         assert!(!repos2.is_empty(), "Should still have repos");
 
         let repo_data2 = repos2
@@ -1254,10 +1422,13 @@ mod tests {
                     .unwrap_or(false)
             })
             .expect("Should still find the repo containing the uploaded file on second refresh");
-        let refreshed_files2 = repo_data2["refreshed_files"].as_array()
+        let refreshed_files2 = repo_data2["refreshed_files"]
+            .as_array()
             .expect("refreshed_files should be an array");
-        assert!(refreshed_files2.is_empty(),
-            "No files should be refreshed on second call since all are present");
+        assert!(
+            refreshed_files2.is_empty(),
+            "No files should be refreshed on second call since all are present"
+        );
 
         // Clean up both backends - secondary first, then main
         backend2.stop().await?;
@@ -1266,6 +1437,451 @@ mod tests {
 
         Ok(())
     }
+
+    async fn assert_member_refreshes_owner_upload_after_join(
+        test_name: &str,
+        file_name: &str,
+        file_content: Vec<u8>,
+    ) -> Result<()> {
+        let _ = env_logger::try_init();
+        log::info!("Testing refresh when member joins before owner upload: {test_name}");
+
+        // Create secondary backend (creator) first.
+        let (path2, namespace2) = get_test_config(&format!("{test_name}_secondary")).await;
+        let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
+        let (veilid_api2, update_rx2) = init_veilid_for_tests(
+            path2.to_path_buf().as_path(),
+            namespace2,
+            Duration::from_secs(180),
+        )
+        .await?;
+        let backend2 =
+            Backend::from_dependencies(&path2.to_path_buf(), veilid_api2, update_rx2, store2)
+                .await
+                .unwrap();
+        wait_for_public_internet_ready(&backend2).await?;
+
+        // Initialize main backend (joiner).
+        let _path = init_test_backend(&format!("{test_name}_main")).await?;
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            wait_for_public_internet_ready(&backend).await?;
+        }
+
+        // Owner creates a group and repo, but does not upload until after the member joins.
+        let mut group = backend2.create_group().await?;
+        let join_url = group.get_url()?;
+        group.set_name(TEST_GROUP_NAME).await?;
+        let repo = group.create_repo().await?;
+        repo.set_name(TEST_GROUP_NAME).await?;
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            backend.join_from_url(join_url.as_str()).await?;
+        }
+
+        // Wait until the joiner can see the joined group and at least one repo before upload.
+        let mut metadata_retries = 20;
+        loop {
+            let groups_req = test::TestRequest::get().uri("/api/groups").to_request();
+            let groups_resp: GroupsResponse = test::call_and_read_body_json(&app, groups_req).await;
+            let repos_req = test::TestRequest::get()
+                .uri(&format!("/api/groups/{}/repos", group.id()))
+                .to_request();
+            let repos_resp: ReposResponse = test::call_and_read_body_json(&app, repos_req).await;
+
+            let has_group = groups_resp
+                .groups
+                .iter()
+                .any(|g| g.key == group.id().to_string());
+            if has_group && !repos_resp.repos.is_empty() {
+                break;
+            }
+
+            metadata_retries -= 1;
+            if metadata_retries == 0 {
+                panic!(
+                    "Member did not converge on joined group metadata before upload. groups: {}, repos: {}",
+                    groups_resp.groups.len(),
+                    repos_resp.repos.len(),
+                );
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+
+        repo.upload(file_name, file_content.clone()).await?;
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        let mut refresh_retries = 20;
+        loop {
+            let refresh_req = test::TestRequest::post()
+                .uri(&format!("/api/groups/{}/refresh", group.id()))
+                .to_request();
+            let refresh_resp = test::call_service(&app, refresh_req).await;
+            let refresh_status = refresh_resp.status();
+
+            if refresh_status.is_success() {
+                let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
+                let repo_id_with_file = refresh_data["repos"].as_array().and_then(|repos| {
+                    repos.iter().find_map(|repo| {
+                        let has_file = repo["all_files"]
+                            .as_array()
+                            .map(|files| files.iter().any(|f| f.as_str() == Some(file_name)))
+                            .unwrap_or(false);
+                        if has_file {
+                            repo["repo_id"].as_str().map(ToOwned::to_owned)
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+                if let Some(repo_id) = repo_id_with_file {
+                    let get_file_req = test::TestRequest::get()
+                        .uri(&format!(
+                            "/api/groups/{}/repos/{}/media/{}",
+                            group.id(),
+                            repo_id,
+                            file_name
+                        ))
+                        .to_request();
+                    let get_file_resp = test::call_service(&app, get_file_req).await;
+                    if get_file_resp.status().is_success() {
+                        let got_content = test::read_body(get_file_resp).await;
+                        assert_eq!(
+                            got_content.to_vec(),
+                            file_content,
+                            "Downloaded file should match uploaded bytes"
+                        );
+                        break;
+                    }
+                }
+            } else {
+                let body = test::read_body(refresh_resp).await;
+                let body_text = String::from_utf8_lossy(&body).to_string();
+                let is_retryable = body_text.contains("couldn't look up relay")
+                    || body_text.contains("Unable to open group DHT record")
+                    || body_text.contains("Group not found:")
+                    || body_text.contains("Unable to download hash");
+                if !is_retryable {
+                    panic!(
+                        "Refresh failed with non-retryable error. status={refresh_status}, body={body_text}"
+                    );
+                }
+            }
+
+            refresh_retries -= 1;
+            if refresh_retries == 0 {
+                panic!("Member did not refresh and download owner upload after 20 attempts.");
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+
+        backend2.stop().await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        cleanup_test_resources().await?;
+
+        Ok(())
+    }
+
+    #[actix_web::test]
+    #[serial]
+    async fn test_refresh_member_joined_before_owner_uploads() -> Result<()> {
+        assert_member_refreshes_owner_upload_after_join(
+            "test_refresh_member_joined_before_upload",
+            "member-joined-before-upload-16k.bin",
+            deterministic_test_payload(16 * 1024),
+        )
+        .await
+    }
+
+    #[actix_web::test]
+    #[serial]
+    #[ignore = "manual large-transfer coverage; 320 KiB is currently flaky on local Veilid/Iroh tunnels"]
+    async fn test_refresh_member_joined_before_owner_uploads_320k_file() -> Result<()> {
+        assert_member_refreshes_owner_upload_after_join(
+            "test_refresh_member_joined_before_upload_320k",
+            "member-joined-before-upload-320k.bin",
+            deterministic_test_payload(320 * 1024),
+        )
+        .await
+    }
+
+    #[actix_web::test]
+    #[serial]
+    #[ignore = "manual diagnostic; run with --ignored --nocapture to print file-size stability data"]
+    async fn test_diagnostic_member_refresh_file_size_sweep() -> Result<()> {
+        let _ = env_logger::try_init();
+        let sizes = diagnostic_file_size_sweep();
+        let attempts = env::var("SAVE_FILE_SIZE_SWEEP_ATTEMPTS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(3);
+        let continue_after_failure = env_flag("SAVE_FILE_SIZE_SWEEP_CONTINUE");
+
+        println!(
+            "FILE_SIZE_SWEEP start sizes={} attempts={} continue_after_failure={}",
+            sizes
+                .iter()
+                .map(|size| format_size(*size))
+                .collect::<Vec<_>>()
+                .join(","),
+            attempts,
+            continue_after_failure
+        );
+
+        // Create secondary backend (creator) first.
+        let (path2, namespace2) = get_test_config("test_file_size_sweep_secondary").await;
+        let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
+        let (veilid_api2, update_rx2) = init_veilid_for_tests(
+            path2.to_path_buf().as_path(),
+            namespace2,
+            Duration::from_secs(180),
+        )
+        .await?;
+        let backend2 =
+            Backend::from_dependencies(&path2.to_path_buf(), veilid_api2, update_rx2, store2)
+                .await
+                .unwrap();
+        wait_for_public_internet_ready(&backend2).await?;
+
+        // Initialize main backend (joiner).
+        let _path = init_test_backend("test_file_size_sweep_main").await?;
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            wait_for_public_internet_ready(&backend).await?;
+        }
+
+        let mut group = backend2.create_group().await?;
+        let join_url = group.get_url()?;
+        group.set_name(TEST_GROUP_NAME).await?;
+        let repo = group.create_repo().await?;
+        repo.set_name(TEST_GROUP_NAME).await?;
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            backend.join_from_url(join_url.as_str()).await?;
+        }
+
+        let mut metadata_retries = 20;
+        loop {
+            let groups_req = test::TestRequest::get().uri("/api/groups").to_request();
+            let groups_resp: GroupsResponse = test::call_and_read_body_json(&app, groups_req).await;
+            let repos_req = test::TestRequest::get()
+                .uri(&format!("/api/groups/{}/repos", group.id()))
+                .to_request();
+            let repos_resp: ReposResponse = test::call_and_read_body_json(&app, repos_req).await;
+
+            let has_group = groups_resp
+                .groups
+                .iter()
+                .any(|g| g.key == group.id().to_string());
+            if has_group && !repos_resp.repos.is_empty() {
+                break;
+            }
+
+            metadata_retries -= 1;
+            if metadata_retries == 0 {
+                println!(
+                    "FILE_SIZE_SWEEP setup_result=fail stage=metadata detail=\"groups={}, repos={}\"",
+                    groups_resp.groups.len(),
+                    repos_resp.repos.len()
+                );
+                backend2.stop().await?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                cleanup_test_resources().await?;
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+
+        for size in sizes {
+            let file_name = format!("sweep-{size}.bin");
+            let file_content = deterministic_test_payload(size);
+            let upload_started = std::time::Instant::now();
+            match repo.upload(&file_name, file_content.clone()).await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!(
+                        "FILE_SIZE_SWEEP size={} bytes={} result=fail stage=upload attempts=0 upload_ms={} detail=\"{}\"",
+                        format_size(size),
+                        size,
+                        upload_started.elapsed().as_millis(),
+                        e
+                    );
+                    if !continue_after_failure {
+                        break;
+                    }
+                    continue;
+                }
+            }
+            let upload_ms = upload_started.elapsed().as_millis();
+            tokio::time::sleep(Duration::from_secs(4)).await;
+
+            let mut last_stage = "not_attempted";
+            let mut last_detail = String::new();
+            let mut last_refresh_ms = 0;
+            let mut last_download_ms = 0;
+            let mut passed = false;
+
+            for attempt in 1..=attempts {
+                let refresh_started = std::time::Instant::now();
+                let refresh_req = test::TestRequest::post()
+                    .uri(&format!("/api/groups/{}/refresh", group.id()))
+                    .to_request();
+                let refresh_resp = test::call_service(&app, refresh_req).await;
+                last_refresh_ms = refresh_started.elapsed().as_millis();
+                let refresh_status = refresh_resp.status();
+
+                if !refresh_status.is_success() {
+                    let body = test::read_body(refresh_resp).await;
+                    let body_text = String::from_utf8_lossy(&body).to_string();
+                    last_stage = classify_transfer_failure(&body_text);
+                    last_detail = format!("refresh status={refresh_status}, body={body_text}");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+
+                let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
+                let repo_errors = refresh_data["repos"]
+                    .as_array()
+                    .map(|repos| {
+                        repos
+                            .iter()
+                            .flat_map(|repo| {
+                                ["error", "repo_hash_error", "error_listing_files"]
+                                    .into_iter()
+                                    .filter_map(|key| repo[key].as_str())
+                                    .map(ToOwned::to_owned)
+                                    .collect::<Vec<_>>()
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let repo_id_with_file = refresh_data["repos"].as_array().and_then(|repos| {
+                    repos.iter().find_map(|repo| {
+                        let has_file = repo["all_files"]
+                            .as_array()
+                            .map(|files| files.iter().any(|f| f.as_str() == Some(&file_name)))
+                            .unwrap_or(false);
+                        if has_file {
+                            repo["repo_id"].as_str().map(ToOwned::to_owned)
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+                let Some(repo_id) = repo_id_with_file else {
+                    last_stage = if repo_errors.iter().any(|error| error.contains("repo hash")) {
+                        "repo_hash_dht"
+                    } else if repo_errors
+                        .iter()
+                        .any(|error| error.contains("downloading collection"))
+                    {
+                        "collection_blob_transfer"
+                    } else {
+                        "refresh_visible"
+                    };
+                    last_detail = if repo_errors.is_empty() {
+                        "refresh succeeded but file was not visible".to_string()
+                    } else {
+                        repo_errors.join(" | ")
+                    };
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                };
+
+                let download_started = std::time::Instant::now();
+                let get_file_req = test::TestRequest::get()
+                    .uri(&format!(
+                        "/api/groups/{}/repos/{}/media/{}",
+                        group.id(),
+                        repo_id,
+                        file_name
+                    ))
+                    .to_request();
+                let get_file_resp = test::call_service(&app, get_file_req).await;
+                last_download_ms = download_started.elapsed().as_millis();
+                let download_status = get_file_resp.status();
+
+                if !download_status.is_success() {
+                    let body = test::read_body(get_file_resp).await;
+                    let body_text = String::from_utf8_lossy(&body).to_string();
+                    last_stage = classify_transfer_failure(&body_text);
+                    last_detail = format!("download status={download_status}, body={body_text}");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+
+                let got_content = test::read_body(get_file_resp).await;
+                if got_content.to_vec() == file_content {
+                    println!(
+                        "FILE_SIZE_SWEEP size={} bytes={} result=ok attempts={} upload_ms={} refresh_ms={} download_ms={}",
+                        format_size(size),
+                        size,
+                        attempt,
+                        upload_ms,
+                        last_refresh_ms,
+                        last_download_ms
+                    );
+                    passed = true;
+                    break;
+                }
+
+                last_stage = "download_bytes";
+                last_detail = format!(
+                    "downloaded {} bytes, expected {} bytes",
+                    got_content.len(),
+                    size
+                );
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+
+            if !passed {
+                println!(
+                    "FILE_SIZE_SWEEP size={} bytes={} result=fail attempts={} upload_ms={} refresh_ms={} download_ms={} stage={} detail=\"{}\"",
+                    format_size(size),
+                    size,
+                    attempts,
+                    upload_ms,
+                    last_refresh_ms,
+                    last_download_ms,
+                    last_stage,
+                    last_detail.replace('"', "'")
+                );
+                if !continue_after_failure {
+                    break;
+                }
+            }
+        }
+
+        backend2.stop().await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        cleanup_test_resources().await?;
+
+        Ok(())
+    }
+
     #[actix_web::test]
     #[serial]
     async fn test_health_endpoint() -> Result<()> {
@@ -1283,13 +1899,19 @@ mod tests {
         // Test the health endpoint
         let health_req = test::TestRequest::get().uri("/health").to_request();
         let health_resp = test::call_service(&app, health_req).await;
-        
+
         // Verify response status is 200 OK
-        assert!(health_resp.status().is_success(), "Health endpoint should return 200 OK");
-        
+        assert!(
+            health_resp.status().is_success(),
+            "Health endpoint should return 200 OK"
+        );
+
         // Verify response body
         let health_data: serde_json::Value = test::read_body_json(health_resp).await;
-        assert_eq!(health_data["status"], "OK", "Health endpoint should return status OK");
+        assert_eq!(
+            health_data["status"], "OK",
+            "Health endpoint should return status OK"
+        );
 
         // Clean up
         cleanup_test_resources().await?;
@@ -1318,19 +1940,13 @@ mod tests {
         // Create secondary backend (creator) with unique namespace
         let (path2, namespace2) = get_test_config("test_idempotent_create_repo_secondary").await;
         let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
-        let (veilid_api2, update_rx2) = save_dweb_backend::common::init_veilid(
-            path2.to_path_buf().as_path(),
-            namespace2,
-        )
-        .await?;
-        let backend2 = Backend::from_dependencies(
-            &path2.to_path_buf(),
-            veilid_api2,
-            update_rx2,
-            store2,
-        )
-        .await
-        .unwrap();
+        let (veilid_api2, update_rx2) =
+            save_dweb_backend::common::init_veilid(path2.to_path_buf().as_path(), namespace2)
+                .await?;
+        let backend2 =
+            Backend::from_dependencies(&path2.to_path_buf(), veilid_api2, update_rx2, store2)
+                .await
+                .unwrap();
 
         // Create a group on backend2 (creator)
         let group2 = backend2.create_group().await?;

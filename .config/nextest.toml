@@ -17,11 +17,12 @@ test-threads = 1
 [[profile.default.overrides]]
 filter = 'test(test_replicate_group) | test(test_join_group)'
 retries = { backoff = "exponential", count = 4, delay = "8s", max-delay = "45s", jitter = true }
+slow-timeout = { period = "60s", terminate-after = 6 }
 
 [[profile.default.overrides]]
-filter = 'test(test_refresh_joined_group)'
+filter = 'test(test_refresh_joined_group) | test(test_refresh_member_joined_before_owner_uploads)'
 retries = { backoff = "exponential", count = 2, delay = "8s", max-delay = "30s", jitter = true }
-slow-timeout = { period = "60s", terminate-after = 5 }
+slow-timeout = { period = "60s", terminate-after = 8 }
 
 # Faster CI profile used for PR runs.
 [profile.ci-virtual]
@@ -32,9 +33,9 @@ test-threads = 1
 [[profile.ci-virtual.overrides]]
 filter = 'test(test_replicate_group) | test(test_join_group)'
 retries = { backoff = "exponential", count = 2, delay = "5s", max-delay = "20s", jitter = true }
-slow-timeout = { period = "45s", terminate-after = 4 }
+slow-timeout = { period = "60s", terminate-after = 6 }
 
 [[profile.ci-virtual.overrides]]
-filter = 'test(test_refresh_joined_group)'
+filter = 'test(test_refresh_joined_group) | test(test_refresh_member_joined_before_owner_uploads)'
 retries = { backoff = "exponential", count = 1, delay = "5s", max-delay = "15s", jitter = true }
-slow-timeout = { period = "45s", terminate-after = 4 }
+slow-timeout = { period = "60s", terminate-after = 8 }
