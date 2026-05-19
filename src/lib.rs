@@ -98,6 +98,84 @@ mod tests {
             .collect()
     }
 
+    fn parse_size_token(token: &str) -> Option<usize> {
+        let normalized = token.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            return None;
+        }
+
+        let units = [
+            ("kib", 1024usize),
+            ("kb", 1024usize),
+            ("k", 1024usize),
+            ("mib", 1024usize * 1024),
+            ("mb", 1024usize * 1024),
+            ("m", 1024usize * 1024),
+        ];
+
+        for (suffix, multiplier) in units {
+            if let Some(value) = normalized.strip_suffix(suffix) {
+                return value
+                    .trim()
+                    .parse::<usize>()
+                    .ok()
+                    .map(|size| size * multiplier);
+            }
+        }
+
+        normalized.parse::<usize>().ok()
+    }
+
+    fn diagnostic_file_size_sweep() -> Vec<usize> {
+        if let Ok(value) = env::var("SAVE_FILE_SIZE_SWEEP_BYTES") {
+            let sizes: Vec<usize> = value
+                .split(',')
+                .filter_map(parse_size_token)
+                .filter(|size| *size > 0)
+                .collect();
+            if !sizes.is_empty() {
+                return sizes;
+            }
+        }
+
+        vec![
+            16 * 1024,
+            64 * 1024,
+            128 * 1024,
+            256 * 1024,
+            320 * 1024,
+            512 * 1024,
+            1024 * 1024,
+        ]
+    }
+
+    fn format_size(size: usize) -> String {
+        if size % (1024 * 1024) == 0 {
+            format!("{}MiB", size / (1024 * 1024))
+        } else if size % 1024 == 0 {
+            format!("{}KiB", size / 1024)
+        } else {
+            format!("{size}B")
+        }
+    }
+
+    fn classify_transfer_failure(body: &str) -> &'static str {
+        if body.contains("Timed out getting repo hash")
+            || body.contains("Unable to get DHT value for repo root hash")
+        {
+            "repo_hash_dht"
+        } else if body.contains("Error downloading collection") {
+            "collection_blob_transfer"
+        } else if body.contains("Unable to download hash")
+            || body.contains("Tunnel closed")
+            || body.contains("Unable to read Timeout")
+        {
+            "file_blob_transfer"
+        } else {
+            "unknown"
+        }
+    }
+
     fn apply_test_network_overrides(config: &mut VeilidConfig) {
         if !env_flag("SAVE_VEILID_LOCAL_TEST_MODE") {
             return;
@@ -1536,6 +1614,272 @@ mod tests {
             deterministic_test_payload(320 * 1024),
         )
         .await
+    }
+
+    #[actix_web::test]
+    #[serial]
+    #[ignore = "manual diagnostic; run with --ignored --nocapture to print file-size stability data"]
+    async fn test_diagnostic_member_refresh_file_size_sweep() -> Result<()> {
+        let _ = env_logger::try_init();
+        let sizes = diagnostic_file_size_sweep();
+        let attempts = env::var("SAVE_FILE_SIZE_SWEEP_ATTEMPTS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(3);
+        let continue_after_failure = env_flag("SAVE_FILE_SIZE_SWEEP_CONTINUE");
+
+        println!(
+            "FILE_SIZE_SWEEP start sizes={} attempts={} continue_after_failure={}",
+            sizes
+                .iter()
+                .map(|size| format_size(*size))
+                .collect::<Vec<_>>()
+                .join(","),
+            attempts,
+            continue_after_failure
+        );
+
+        // Create secondary backend (creator) first.
+        let (path2, namespace2) = get_test_config("test_file_size_sweep_secondary").await;
+        let store2 = iroh_blobs::store::fs::Store::load(path2.to_path_buf().join("iroh2")).await?;
+        let (veilid_api2, update_rx2) = init_veilid_for_tests(
+            path2.to_path_buf().as_path(),
+            namespace2,
+            Duration::from_secs(180),
+        )
+        .await?;
+        let backend2 =
+            Backend::from_dependencies(&path2.to_path_buf(), veilid_api2, update_rx2, store2)
+                .await
+                .unwrap();
+        wait_for_public_internet_ready(&backend2).await?;
+
+        // Initialize main backend (joiner).
+        let _path = init_test_backend("test_file_size_sweep_main").await?;
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            wait_for_public_internet_ready(&backend).await?;
+        }
+
+        let mut group = backend2.create_group().await?;
+        let join_url = group.get_url()?;
+        group.set_name(TEST_GROUP_NAME).await?;
+        let repo = group.create_repo().await?;
+        repo.set_name(TEST_GROUP_NAME).await?;
+
+        let app = test::init_service(
+            App::new()
+                .service(status)
+                .service(web::scope("/api").service(groups::scope())),
+        )
+        .await;
+
+        {
+            use server::get_backend;
+            let backend = get_backend().await?;
+            backend.join_from_url(join_url.as_str()).await?;
+        }
+
+        let mut metadata_retries = 20;
+        loop {
+            let groups_req = test::TestRequest::get().uri("/api/groups").to_request();
+            let groups_resp: GroupsResponse = test::call_and_read_body_json(&app, groups_req).await;
+            let repos_req = test::TestRequest::get()
+                .uri(&format!("/api/groups/{}/repos", group.id()))
+                .to_request();
+            let repos_resp: ReposResponse = test::call_and_read_body_json(&app, repos_req).await;
+
+            let has_group = groups_resp
+                .groups
+                .iter()
+                .any(|g| g.key == group.id().to_string());
+            if has_group && !repos_resp.repos.is_empty() {
+                break;
+            }
+
+            metadata_retries -= 1;
+            if metadata_retries == 0 {
+                println!(
+                    "FILE_SIZE_SWEEP setup_result=fail stage=metadata detail=\"groups={}, repos={}\"",
+                    groups_resp.groups.len(),
+                    repos_resp.repos.len()
+                );
+                backend2.stop().await?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                cleanup_test_resources().await?;
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+
+        for size in sizes {
+            let file_name = format!("sweep-{size}.bin");
+            let file_content = deterministic_test_payload(size);
+            let upload_started = std::time::Instant::now();
+            match repo.upload(&file_name, file_content.clone()).await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!(
+                        "FILE_SIZE_SWEEP size={} bytes={} result=fail stage=upload attempts=0 upload_ms={} detail=\"{}\"",
+                        format_size(size),
+                        size,
+                        upload_started.elapsed().as_millis(),
+                        e
+                    );
+                    if !continue_after_failure {
+                        break;
+                    }
+                    continue;
+                }
+            }
+            let upload_ms = upload_started.elapsed().as_millis();
+            tokio::time::sleep(Duration::from_secs(4)).await;
+
+            let mut last_stage = "not_attempted";
+            let mut last_detail = String::new();
+            let mut last_refresh_ms = 0;
+            let mut last_download_ms = 0;
+            let mut passed = false;
+
+            for attempt in 1..=attempts {
+                let refresh_started = std::time::Instant::now();
+                let refresh_req = test::TestRequest::post()
+                    .uri(&format!("/api/groups/{}/refresh", group.id()))
+                    .to_request();
+                let refresh_resp = test::call_service(&app, refresh_req).await;
+                last_refresh_ms = refresh_started.elapsed().as_millis();
+                let refresh_status = refresh_resp.status();
+
+                if !refresh_status.is_success() {
+                    let body = test::read_body(refresh_resp).await;
+                    let body_text = String::from_utf8_lossy(&body).to_string();
+                    last_stage = classify_transfer_failure(&body_text);
+                    last_detail = format!("refresh status={refresh_status}, body={body_text}");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+
+                let refresh_data: serde_json::Value = test::read_body_json(refresh_resp).await;
+                let repo_errors = refresh_data["repos"]
+                    .as_array()
+                    .map(|repos| {
+                        repos
+                            .iter()
+                            .flat_map(|repo| {
+                                ["error", "repo_hash_error", "error_listing_files"]
+                                    .into_iter()
+                                    .filter_map(|key| repo[key].as_str())
+                                    .map(ToOwned::to_owned)
+                                    .collect::<Vec<_>>()
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let repo_id_with_file = refresh_data["repos"].as_array().and_then(|repos| {
+                    repos.iter().find_map(|repo| {
+                        let has_file = repo["all_files"]
+                            .as_array()
+                            .map(|files| files.iter().any(|f| f.as_str() == Some(&file_name)))
+                            .unwrap_or(false);
+                        if has_file {
+                            repo["repo_id"].as_str().map(ToOwned::to_owned)
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+                let Some(repo_id) = repo_id_with_file else {
+                    last_stage = if repo_errors.iter().any(|error| error.contains("repo hash")) {
+                        "repo_hash_dht"
+                    } else if repo_errors
+                        .iter()
+                        .any(|error| error.contains("downloading collection"))
+                    {
+                        "collection_blob_transfer"
+                    } else {
+                        "refresh_visible"
+                    };
+                    last_detail = if repo_errors.is_empty() {
+                        "refresh succeeded but file was not visible".to_string()
+                    } else {
+                        repo_errors.join(" | ")
+                    };
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                };
+
+                let download_started = std::time::Instant::now();
+                let get_file_req = test::TestRequest::get()
+                    .uri(&format!(
+                        "/api/groups/{}/repos/{}/media/{}",
+                        group.id(),
+                        repo_id,
+                        file_name
+                    ))
+                    .to_request();
+                let get_file_resp = test::call_service(&app, get_file_req).await;
+                last_download_ms = download_started.elapsed().as_millis();
+                let download_status = get_file_resp.status();
+
+                if !download_status.is_success() {
+                    let body = test::read_body(get_file_resp).await;
+                    let body_text = String::from_utf8_lossy(&body).to_string();
+                    last_stage = classify_transfer_failure(&body_text);
+                    last_detail = format!("download status={download_status}, body={body_text}");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+
+                let got_content = test::read_body(get_file_resp).await;
+                if got_content.to_vec() == file_content {
+                    println!(
+                        "FILE_SIZE_SWEEP size={} bytes={} result=ok attempts={} upload_ms={} refresh_ms={} download_ms={}",
+                        format_size(size),
+                        size,
+                        attempt,
+                        upload_ms,
+                        last_refresh_ms,
+                        last_download_ms
+                    );
+                    passed = true;
+                    break;
+                }
+
+                last_stage = "download_bytes";
+                last_detail = format!(
+                    "downloaded {} bytes, expected {} bytes",
+                    got_content.len(),
+                    size
+                );
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+
+            if !passed {
+                println!(
+                    "FILE_SIZE_SWEEP size={} bytes={} result=fail attempts={} upload_ms={} refresh_ms={} download_ms={} stage={} detail=\"{}\"",
+                    format_size(size),
+                    size,
+                    attempts,
+                    upload_ms,
+                    last_refresh_ms,
+                    last_download_ms,
+                    last_stage,
+                    last_detail.replace('"', "'")
+                );
+                if !continue_after_failure {
+                    break;
+                }
+            }
+        }
+
+        backend2.stop().await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        cleanup_test_resources().await?;
+
+        Ok(())
     }
 
     #[actix_web::test]
