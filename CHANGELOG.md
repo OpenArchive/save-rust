@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-05-31
+
+- Bump `save-dweb-backend` dependency to `v0.3.7`.
+- Bump `save` crate version to `0.2.4`.
+
 ## 2026-02-17
 
 - Upgrade to `veilid-core` v0.5.2.
