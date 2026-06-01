@@ -2,6 +2,10 @@
 
 ## 2026-05-31
 
+- Bump `save` crate version to `0.2.5`.
+- Patch `actix-http` to `3.12.1` to address `GHSA-xhj4-vrgc-hr34`.
+- Remove stale personal author metadata from `Cargo.toml`.
+
 - Bump `save-dweb-backend` dependency to `v0.3.7`.
 - Bump `save` crate version to `0.2.4`.
 
