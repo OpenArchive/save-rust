@@ -1392,6 +1392,69 @@ mod tests {
             "Refresh should not mark the file body as downloaded before explicit media GET"
         );
 
+        // Test second refresh before downloading the file body. It should remain metadata-only.
+        let refresh_req2 = test::TestRequest::post()
+            .uri(&format!("/api/groups/{}/refresh", group.id()))
+            .to_request();
+        let refresh_resp2 = test::call_service(&app, refresh_req2).await;
+        assert!(
+            refresh_resp2.status().is_success(),
+            "Second refresh should succeed before explicit media GET"
+        );
+
+        let refresh_data2: serde_json::Value = test::read_body_json(refresh_resp2).await;
+        assert_eq!(
+            refresh_data2["status"], "success",
+            "Second refresh status should be success"
+        );
+
+        let repos2 = refresh_data2["repos"]
+            .as_array()
+            .expect("repos should be an array");
+        assert!(!repos2.is_empty(), "Should still have repos");
+
+        let repo_data2 = repos2
+            .iter()
+            .find(|r| {
+                r["all_files"]
+                    .as_array()
+                    .map(|files| files.iter().any(|f| f.as_str() == Some(file_name)))
+                    .unwrap_or(false)
+            })
+            .expect("Should still find the repo containing the uploaded file on second refresh");
+        let refreshed_files2 = repo_data2["refreshed_files"]
+            .as_array()
+            .expect("refreshed_files should be an array");
+        assert!(
+            refreshed_files2.is_empty(),
+            "Repeated refresh should still not download media bodies, got {refreshed_files2:?}"
+        );
+
+        let list_files_after_second_refresh_req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/groups/{}/repos/{}/media",
+                group.id(),
+                refreshed_repo_id
+            ))
+            .to_request();
+        let list_files_after_second_refresh_resp =
+            test::call_service(&app, list_files_after_second_refresh_req).await;
+        assert!(
+            list_files_after_second_refresh_resp.status().is_success(),
+            "File list should still be accessible after repeated metadata-only refresh"
+        );
+        let list_files_after_second_refresh_data: FilesResponse =
+            test::read_body_json(list_files_after_second_refresh_resp).await;
+        let listed_file_after_second_refresh = list_files_after_second_refresh_data
+            .files
+            .iter()
+            .find(|file| file.name == file_name)
+            .expect("File list should still include metadata for the uploaded file");
+        assert!(
+            !listed_file_after_second_refresh.is_downloaded,
+            "Repeated refresh should not mark the file body as downloaded before explicit media GET"
+        );
+
         // Verify file is accessible after refresh
         let get_file_req = test::TestRequest::get()
             .uri(&format!(
@@ -1435,44 +1498,6 @@ mod tests {
         assert!(
             listed_file_after_get.is_downloaded,
             "Explicit media GET should mark the file body as downloaded locally"
-        );
-
-        // Test second refresh - should be no-op since all files are present
-        let refresh_req2 = test::TestRequest::post()
-            .uri(&format!("/api/groups/{}/refresh", group.id()))
-            .to_request();
-        let refresh_resp2 = test::call_service(&app, refresh_req2).await;
-        assert!(
-            refresh_resp2.status().is_success(),
-            "Second refresh should succeed"
-        );
-
-        let refresh_data2: serde_json::Value = test::read_body_json(refresh_resp2).await;
-        assert_eq!(
-            refresh_data2["status"], "success",
-            "Second refresh status should be success"
-        );
-
-        let repos2 = refresh_data2["repos"]
-            .as_array()
-            .expect("repos should be an array");
-        assert!(!repos2.is_empty(), "Should still have repos");
-
-        let repo_data2 = repos2
-            .iter()
-            .find(|r| {
-                r["all_files"]
-                    .as_array()
-                    .map(|files| files.iter().any(|f| f.as_str() == Some(file_name)))
-                    .unwrap_or(false)
-            })
-            .expect("Should still find the repo containing the uploaded file on second refresh");
-        let refreshed_files2 = repo_data2["refreshed_files"]
-            .as_array()
-            .expect("refreshed_files should be an array");
-        assert!(
-            refreshed_files2.is_empty(),
-            "No files should be refreshed on second call since all are present"
         );
 
         // Clean up both backends - secondary first, then main
