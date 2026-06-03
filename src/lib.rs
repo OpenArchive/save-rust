@@ -1355,10 +1355,8 @@ mod tests {
             .as_array()
             .expect("refreshed_files should be an array");
         assert!(
-            refreshed_files.is_empty()
-                || (refreshed_files.len() == 1
-                    && refreshed_files[0].as_str() == Some(file_name)),
-            "First refresh should report either no-op or one refreshed expected file, got {refreshed_files:?}"
+            refreshed_files.is_empty(),
+            "Refresh should discover metadata without downloading media bodies, got {refreshed_files:?}"
         );
 
         let all_files = repo_data["all_files"]
@@ -1369,6 +1367,29 @@ mod tests {
             all_files[0].as_str().unwrap(),
             file_name,
             "all_files should contain the uploaded file"
+        );
+
+        let list_files_req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/groups/{}/repos/{}/media",
+                group.id(),
+                refreshed_repo_id
+            ))
+            .to_request();
+        let list_files_resp = test::call_service(&app, list_files_req).await;
+        assert!(
+            list_files_resp.status().is_success(),
+            "File list should be accessible after metadata-only refresh"
+        );
+        let list_files_data: FilesResponse = test::read_body_json(list_files_resp).await;
+        let listed_file = list_files_data
+            .files
+            .iter()
+            .find(|file| file.name == file_name)
+            .expect("File list should include metadata for the uploaded file");
+        assert!(
+            !listed_file.is_downloaded,
+            "Refresh should not mark the file body as downloaded before explicit media GET"
         );
 
         // Verify file is accessible after refresh
@@ -1390,6 +1411,30 @@ mod tests {
             got_content.to_vec(),
             file_content.to_vec(),
             "File content should match after refresh"
+        );
+
+        let list_files_after_get_req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/groups/{}/repos/{}/media",
+                group.id(),
+                refreshed_repo_id
+            ))
+            .to_request();
+        let list_files_after_get_resp = test::call_service(&app, list_files_after_get_req).await;
+        assert!(
+            list_files_after_get_resp.status().is_success(),
+            "File list should still be accessible after explicit media GET"
+        );
+        let list_files_after_get_data: FilesResponse =
+            test::read_body_json(list_files_after_get_resp).await;
+        let listed_file_after_get = list_files_after_get_data
+            .files
+            .iter()
+            .find(|file| file.name == file_name)
+            .expect("File list should still include the uploaded file");
+        assert!(
+            listed_file_after_get.is_downloaded,
+            "Explicit media GET should mark the file body as downloaded locally"
         );
 
         // Test second refresh - should be no-op since all files are present
