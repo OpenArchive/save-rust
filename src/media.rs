@@ -159,9 +159,23 @@ async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder>
     let repo_crypto_key = create_veilid_cryptokey_from_base64(repo_id)?;
     let repo = group.get_repo(&repo_crypto_key).await?;
 
-    let hash = repo.get_hash_from_dht().await?;
-    if !group.has_hash(&hash).await? {
-        download_hash_for_media(group.as_ref(), &hash).await?;
+    if !repo.can_write() {
+        match repo.get_hash_from_dht().await {
+            Ok(hash) => {
+                if !group.has_hash(&hash).await? {
+                    download_hash_for_media(group.as_ref(), &hash).await?;
+                }
+            }
+            Err(err) => {
+                log_info!(
+                    TAG,
+                    "Repo {} has no published collection hash while listing media; returning empty list: {}",
+                    repo_id,
+                    err
+                );
+                return Ok(HttpResponse::Ok().json(json!({ "files": [] })));
+            }
+        }
     }
 
     // List files and check if they are downloaded

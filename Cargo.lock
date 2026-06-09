@@ -1636,7 +1636,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1936,7 +1936,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2854,7 +2854,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "tokio",
  "tower-service",
  "tracing",
@@ -3525,7 +3525,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4230,7 +4230,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4470,7 +4470,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.45.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5069,7 +5069,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.36",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5106,9 +5106,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5615,7 +5615,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5795,7 +5795,7 @@ dependencies = [
 
 [[package]]
 name = "save"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -5827,8 +5827,8 @@ dependencies = [
 
 [[package]]
 name = "save-dweb-backend"
-version = "0.3.7"
-source = "git+https://github.com/OpenArchive/save-dweb-backend?tag=v0.3.7#5c043085b09f1b0fd6da2c5f1b4e9195918353e3"
+version = "0.3.8"
+source = "git+https://github.com/OpenArchive/save-dweb-backend?tag=v0.3.8#1bb6559fe0df202806d40b6a1b0f43dd7673c89f"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -6791,7 +6791,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7515,14 +7515,15 @@ dependencies = [
 
 [[package]]
 name = "veilid-iroh-blobs"
-version = "0.3.4"
-source = "git+https://github.com/RangerMauve/veilid-iroh-blobs?tag=v0.3.4#62c64886942f78ef0855fa97c529c240e809eca2"
+version = "0.3.5"
+source = "git+https://github.com/RangerMauve/veilid-iroh-blobs?tag=v0.3.5#79c00a342691f12d01af426c271b93bfa9f1cf64"
 dependencies = [
  "anyhow",
  "bytes",
  "futures-lite",
  "futures-util",
  "hex",
+ "hickory-resolver",
  "iroh-blobs",
  "iroh-io",
  "serde",
@@ -7859,7 +7860,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

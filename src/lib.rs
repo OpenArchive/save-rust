@@ -440,7 +440,24 @@ mod tests {
             .as_str()
             .expect("No repo key returned");
 
-        // Step 3: Upload a file to the repository
+        // Step 3: List files before upload; empty repos should not fail with a DHT error.
+        let empty_list_files_req = test::TestRequest::get()
+            .uri(&format!("/api/groups/{group_id}/repos/{repo_id}/media"))
+            .to_request();
+        let empty_list_files_resp = test::call_service(&app, empty_list_files_req).await;
+        assert!(
+            empty_list_files_resp.status().is_success(),
+            "Empty repo media list should not fail: {}",
+            empty_list_files_resp.status()
+        );
+        let empty_list_files_data: FilesResponse =
+            test::read_body_json(empty_list_files_resp).await;
+        assert!(
+            empty_list_files_data.files.is_empty(),
+            "Empty repo media list should return no files"
+        );
+
+        // Step 4: Upload a file to the repository
         let file_name = "example.txt";
         let file_content = b"Test content for file upload";
 
@@ -455,7 +472,7 @@ mod tests {
         // Check upload success
         assert!(upload_resp.status().is_success(), "File upload failed");
 
-        // Step 4: List files in the repository
+        // Step 5: List files in the repository
         let list_files_req = test::TestRequest::get()
             .uri(&format!("/api/groups/{group_id}/repos/{repo_id}/media"))
             .to_request();
@@ -488,7 +505,7 @@ mod tests {
             "Downloaded back file content"
         );
 
-        // Step 5: Delete the file from the repository
+        // Step 6: Delete the file from the repository
         let delete_file_req = test::TestRequest::delete()
             .uri(&format!(
                 "/api/groups/{}/repos/{}/media/{}",
@@ -499,7 +516,7 @@ mod tests {
 
         assert!(delete_resp.status().is_success(), "File deletion failed");
 
-        // Step 6: Verify the file is no longer listed
+        // Step 7: Verify the file is no longer listed
         let list_files_after_deletion_req = test::TestRequest::get()
             .uri(&format!("/api/groups/{group_id}/repos/{repo_id}/media"))
             .to_request();
