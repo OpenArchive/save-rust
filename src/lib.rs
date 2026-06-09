@@ -440,7 +440,24 @@ mod tests {
             .as_str()
             .expect("No repo key returned");
 
-        // Step 3: Upload a file to the repository
+        // Step 3: List files before upload; empty repos should not fail with a DHT error.
+        let empty_list_files_req = test::TestRequest::get()
+            .uri(&format!("/api/groups/{group_id}/repos/{repo_id}/media"))
+            .to_request();
+        let empty_list_files_resp = test::call_service(&app, empty_list_files_req).await;
+        assert!(
+            empty_list_files_resp.status().is_success(),
+            "Empty repo media list should not fail: {}",
+            empty_list_files_resp.status()
+        );
+        let empty_list_files_data: FilesResponse =
+            test::read_body_json(empty_list_files_resp).await;
+        assert!(
+            empty_list_files_data.files.is_empty(),
+            "Empty repo media list should return no files"
+        );
+
+        // Step 4: Upload a file to the repository
         let file_name = "example.txt";
         let file_content = b"Test content for file upload";
 
@@ -455,7 +472,7 @@ mod tests {
         // Check upload success
         assert!(upload_resp.status().is_success(), "File upload failed");
 
-        // Step 4: List files in the repository
+        // Step 5: List files in the repository
         let list_files_req = test::TestRequest::get()
             .uri(&format!("/api/groups/{group_id}/repos/{repo_id}/media"))
             .to_request();
@@ -488,7 +505,7 @@ mod tests {
             "Downloaded back file content"
         );
 
-        // Step 5: Delete the file from the repository
+        // Step 6: Delete the file from the repository
         let delete_file_req = test::TestRequest::delete()
             .uri(&format!(
                 "/api/groups/{}/repos/{}/media/{}",
@@ -499,7 +516,7 @@ mod tests {
 
         assert!(delete_resp.status().is_success(), "File deletion failed");
 
-        // Step 6: Verify the file is no longer listed
+        // Step 7: Verify the file is no longer listed
         let list_files_after_deletion_req = test::TestRequest::get()
             .uri(&format!("/api/groups/{group_id}/repos/{repo_id}/media"))
             .to_request();
@@ -1355,10 +1372,8 @@ mod tests {
             .as_array()
             .expect("refreshed_files should be an array");
         assert!(
-            refreshed_files.is_empty()
-                || (refreshed_files.len() == 1
-                    && refreshed_files[0].as_str() == Some(file_name)),
-            "First refresh should report either no-op or one refreshed expected file, got {refreshed_files:?}"
+            refreshed_files.is_empty(),
+            "Refresh should discover metadata without downloading media bodies, got {refreshed_files:?}"
         );
 
         let all_files = repo_data["all_files"]
@@ -1371,35 +1386,37 @@ mod tests {
             "all_files should contain the uploaded file"
         );
 
-        // Verify file is accessible after refresh
-        let get_file_req = test::TestRequest::get()
+        let list_files_req = test::TestRequest::get()
             .uri(&format!(
-                "/api/groups/{}/repos/{}/media/{}",
+                "/api/groups/{}/repos/{}/media",
                 group.id(),
-                refreshed_repo_id,
-                file_name
+                refreshed_repo_id
             ))
             .to_request();
-        let get_file_resp = test::call_service(&app, get_file_req).await;
+        let list_files_resp = test::call_service(&app, list_files_req).await;
         assert!(
-            get_file_resp.status().is_success(),
-            "File should be accessible after refresh"
+            list_files_resp.status().is_success(),
+            "File list should be accessible after metadata-only refresh"
         );
-        let got_content = test::read_body(get_file_resp).await;
-        assert_eq!(
-            got_content.to_vec(),
-            file_content.to_vec(),
-            "File content should match after refresh"
+        let list_files_data: FilesResponse = test::read_body_json(list_files_resp).await;
+        let listed_file = list_files_data
+            .files
+            .iter()
+            .find(|file| file.name == file_name)
+            .expect("File list should include metadata for the uploaded file");
+        assert!(
+            !listed_file.is_downloaded,
+            "Refresh should not mark the file body as downloaded before explicit media GET"
         );
 
-        // Test second refresh - should be no-op since all files are present
+        // Test second refresh before downloading the file body. It should remain metadata-only.
         let refresh_req2 = test::TestRequest::post()
             .uri(&format!("/api/groups/{}/refresh", group.id()))
             .to_request();
         let refresh_resp2 = test::call_service(&app, refresh_req2).await;
         assert!(
             refresh_resp2.status().is_success(),
-            "Second refresh should succeed"
+            "Second refresh should succeed before explicit media GET"
         );
 
         let refresh_data2: serde_json::Value = test::read_body_json(refresh_resp2).await;
@@ -1427,7 +1444,77 @@ mod tests {
             .expect("refreshed_files should be an array");
         assert!(
             refreshed_files2.is_empty(),
-            "No files should be refreshed on second call since all are present"
+            "Repeated refresh should still not download media bodies, got {refreshed_files2:?}"
+        );
+
+        let list_files_after_second_refresh_req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/groups/{}/repos/{}/media",
+                group.id(),
+                refreshed_repo_id
+            ))
+            .to_request();
+        let list_files_after_second_refresh_resp =
+            test::call_service(&app, list_files_after_second_refresh_req).await;
+        assert!(
+            list_files_after_second_refresh_resp.status().is_success(),
+            "File list should still be accessible after repeated metadata-only refresh"
+        );
+        let list_files_after_second_refresh_data: FilesResponse =
+            test::read_body_json(list_files_after_second_refresh_resp).await;
+        let listed_file_after_second_refresh = list_files_after_second_refresh_data
+            .files
+            .iter()
+            .find(|file| file.name == file_name)
+            .expect("File list should still include metadata for the uploaded file");
+        assert!(
+            !listed_file_after_second_refresh.is_downloaded,
+            "Repeated refresh should not mark the file body as downloaded before explicit media GET"
+        );
+
+        // Verify file is accessible after refresh
+        let get_file_req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/groups/{}/repos/{}/media/{}",
+                group.id(),
+                refreshed_repo_id,
+                file_name
+            ))
+            .to_request();
+        let get_file_resp = test::call_service(&app, get_file_req).await;
+        assert!(
+            get_file_resp.status().is_success(),
+            "File should be accessible after refresh"
+        );
+        let got_content = test::read_body(get_file_resp).await;
+        assert_eq!(
+            got_content.to_vec(),
+            file_content.to_vec(),
+            "File content should match after refresh"
+        );
+
+        let list_files_after_get_req = test::TestRequest::get()
+            .uri(&format!(
+                "/api/groups/{}/repos/{}/media",
+                group.id(),
+                refreshed_repo_id
+            ))
+            .to_request();
+        let list_files_after_get_resp = test::call_service(&app, list_files_after_get_req).await;
+        assert!(
+            list_files_after_get_resp.status().is_success(),
+            "File list should still be accessible after explicit media GET"
+        );
+        let list_files_after_get_data: FilesResponse =
+            test::read_body_json(list_files_after_get_resp).await;
+        let listed_file_after_get = list_files_after_get_data
+            .files
+            .iter()
+            .find(|file| file.name == file_name)
+            .expect("File list should still include the uploaded file");
+        assert!(
+            listed_file_after_get.is_downloaded,
+            "Explicit media GET should mark the file body as downloaded locally"
         );
 
         // Clean up both backends - secondary first, then main

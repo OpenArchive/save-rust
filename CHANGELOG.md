@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-06-09
+
+- Bump `save` crate version to `0.2.6`.
+- Bump `save-dweb-backend` dependency to `v0.3.9`.
+- Defer media body downloads during refresh so file metadata remains available when large media transfers are slow or fail.
+- Return an empty media list for empty repositories instead of surfacing a DHT root-hash error.
+
 ## 2026-05-31
 
 - Bump `save` crate version to `0.2.5`.

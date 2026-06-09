@@ -12,6 +12,9 @@ use futures::Stream;
 use futures::StreamExt;
 use serde_json::json;
 use std::io;
+use std::time::Duration;
+
+const MEDIA_DOWNLOAD_OVERALL_TIMEOUT: Duration = Duration::from_secs(55);
 
 pub fn scope() -> Scope {
     web::scope("/media")
@@ -57,9 +60,28 @@ async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder>
     let repo_crypto_key = create_veilid_cryptokey_from_base64(repo_id)?;
     let repo = group.get_repo(&repo_crypto_key).await?;
 
-    let hash = repo.get_hash_from_dht().await?;
-    if !group.has_hash(&hash).await? {
-        group.download_hash_from_peers(&hash).await?;
+    if !repo.can_write() {
+        match repo.get_hash_from_dht().await {
+            Ok(hash) => {
+                if !group.has_hash(&hash).await? {
+                    group
+                        .download_hash_from_peers_with_timeout(
+                            &hash,
+                            Some(MEDIA_DOWNLOAD_OVERALL_TIMEOUT),
+                        )
+                        .await?;
+                }
+            }
+            Err(err) => {
+                log_info!(
+                    TAG,
+                    "Repo {} has no published collection hash while listing media; returning empty list: {}",
+                    repo_id,
+                    err
+                );
+                return Ok(HttpResponse::Ok().json(json!({ "files": [] })));
+            }
+        }
     }
 
     // List files and check if they are downloaded
@@ -71,7 +93,7 @@ async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder>
             Ok(hash) => hash,
             Err(_) => continue, // Handle the error or skip the file if there's an issue
         };
-        let is_downloaded = repo.has_hash(&file_hash).await.unwrap_or(false); // Check if the file is downloaded
+        let is_downloaded = group.has_hash(&file_hash).await.unwrap_or(false); // Check if the file is local
         files_with_status.push(json!({
             "name": file_name,
             "hash": file_hash,
@@ -100,15 +122,22 @@ async fn download_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<impl Re
     if !repo.can_write() {
         let collection_hash = repo.get_hash_from_dht().await?;
         if !group.has_hash(&collection_hash).await? {
-            group.download_hash_from_peers(&collection_hash).await?;
+            group
+                .download_hash_from_peers_with_timeout(
+                    &collection_hash,
+                    Some(MEDIA_DOWNLOAD_OVERALL_TIMEOUT),
+                )
+                .await?;
         }
     }
 
     // Get the file hash
     let file_hash = repo.get_file_hash(file_name).await?;
 
-    if !repo.can_write() && !group.has_hash(&file_hash).await? {
-        group.download_hash_from_peers(&file_hash).await?;
+    if !group.has_hash(&file_hash).await? {
+        group
+            .download_hash_from_peers_with_timeout(&file_hash, Some(MEDIA_DOWNLOAD_OVERALL_TIMEOUT))
+            .await?;
     }
     // Trigger file download from peers using the hash
     let file_data = repo.get_file_stream(file_name).await?;

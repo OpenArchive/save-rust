@@ -172,7 +172,6 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
             "refreshed_files": json!(Vec::<String>::new()), // Initialize empty
             "all_files": json!(Vec::<String>::new())       // Initialize empty
         });
-        let mut refreshed_files_vec = Vec::new();
         let mut all_files_vec: Vec<String> = Vec::new();
 
         if repo.can_write() {
@@ -292,46 +291,17 @@ async fn refresh_group(group_id: web::Path<String>) -> AppResult<impl Responder>
                 };
                 repo_info["all_files"] = json!(all_files_vec.clone());
 
-                // For each file, check if it needs to be refreshed
-                for file_name in &all_files_vec {
-                    match repo.get_file_hash(file_name).await {
-                        Ok(file_hash) => {
-                            if !group.has_hash(&file_hash).await? {
-                                log_debug!(
-                                    TAG,
-                                    "File {} hash {} not found locally. Downloading...",
-                                    file_name,
-                                    file_hash
-                                );
-                                match group.download_hash_from_peers(&file_hash).await {
-                                    Ok(_) => {
-                                        log_debug!(
-                                            TAG,
-                                            "Successfully downloaded file hash {} for {}",
-                                            file_hash,
-                                            file_name
-                                        );
-                                        refreshed_files_vec.push(file_name.clone());
-                                    }
-                                    Err(e) => {
-                                        log_debug!(
-                                            TAG,
-                                            "Error downloading file {} hash {}: {}",
-                                            file_name,
-                                            file_hash,
-                                            e
-                                        );
-                                        // Optionally add to a list of files that failed to download
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log_debug!(TAG, "Error getting hash for file {}: {}", file_name, e);
-                        }
-                    }
-                }
-                repo_info["refreshed_files"] = json!(refreshed_files_vec);
+                // Keep refresh metadata-only. Downloading every missing file body here
+                // can block later file discovery behind one slow or failing transfer.
+                // `refreshed_files` is retained for API compatibility; file bodies are
+                // now refreshed only by the explicit media endpoints.
+                log_debug!(
+                    TAG,
+                    "Repo {} refresh discovered {} files; body downloads are deferred to media endpoint.",
+                    repo.id(),
+                    all_files_vec.len()
+                );
+                repo_info["refreshed_files"] = json!(Vec::<String>::new());
             }
             Ok(Err(e)) => {
                 log_debug!(TAG, "Error getting repo hash for {}: {}", repo.id(), e);
