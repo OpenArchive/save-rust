@@ -12,108 +12,9 @@ use futures::Stream;
 use futures::StreamExt;
 use serde_json::json;
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-const MEDIA_DOWNLOAD_MAX_ATTEMPTS: u32 = 3;
-const MEDIA_DOWNLOAD_PER_PEER_TIMEOUT: Duration = Duration::from_secs(18);
 const MEDIA_DOWNLOAD_OVERALL_TIMEOUT: Duration = Duration::from_secs(55);
-const MEDIA_DOWNLOAD_INITIAL_BACKOFF: Duration = Duration::from_millis(500);
-
-// TODO: fold this media-specific overall budget into save-dweb-backend's
-// Group::download_hash_from_peers once the backend crate exposes that knob.
-async fn download_hash_for_media(
-    group: &save_dweb_backend::group::Group,
-    hash: &iroh_blobs::Hash,
-) -> AppResult<()> {
-    let mut last_error = None;
-    let started = Instant::now();
-
-    for attempt in 1..=MEDIA_DOWNLOAD_MAX_ATTEMPTS {
-        let mut peer_repos = group.list_peer_repos().await;
-        if peer_repos.is_empty() {
-            return Err(anyhow::anyhow!("Cannot download hash. No other peers found").into());
-        }
-
-        let peer_count = peer_repos.len();
-        peer_repos.rotate_left((attempt as usize - 1) % peer_count);
-
-        for peer_repo in peer_repos {
-            let peer_id = peer_repo.id().to_string();
-
-            let Some(remaining) = MEDIA_DOWNLOAD_OVERALL_TIMEOUT.checked_sub(started.elapsed())
-            else {
-                let detail = format!(
-                    "Timed out downloading hash {hash} after overall {}s media budget",
-                    MEDIA_DOWNLOAD_OVERALL_TIMEOUT.as_secs()
-                );
-                log_info!(TAG, "{}", detail);
-                let last_detail = match last_error {
-                    Some(error) => format!("{detail}; last peer error: {error}"),
-                    None => detail,
-                };
-                return Err(anyhow::anyhow!(
-                    "Unable to download hash {} from any peer after {} media attempts; last error: {}",
-                    hash,
-                    attempt.saturating_sub(1),
-                    last_detail
-                )
-                .into());
-            };
-
-            log_info!(
-                TAG,
-                "Media download attempt {}/{} for hash {} from peer {}",
-                attempt,
-                MEDIA_DOWNLOAD_MAX_ATTEMPTS,
-                hash,
-                peer_id
-            );
-
-            let timeout_budget = std::cmp::min(MEDIA_DOWNLOAD_PER_PEER_TIMEOUT, remaining);
-            let download_result = tokio::time::timeout(timeout_budget, async {
-                let route_id_blob = peer_repo.get_route_id_blob().await?;
-                group
-                    .iroh_blobs
-                    .download_file_from(route_id_blob, hash)
-                    .await
-            })
-            .await;
-
-            match download_result {
-                Ok(Ok(())) => return Ok(()),
-                Ok(Err(e)) => {
-                    let detail = format!("Unable to download hash {hash} from peer {peer_id}: {e}");
-                    log_info!(TAG, "{}", detail);
-                    last_error = Some(detail);
-                }
-                Err(_) => {
-                    let detail = format!(
-                        "Timed out downloading hash {hash} from peer {peer_id} after {}ms",
-                        timeout_budget.as_millis()
-                    );
-                    log_info!(TAG, "{}", detail);
-                    last_error = Some(detail);
-                }
-            }
-        }
-
-        if attempt < MEDIA_DOWNLOAD_MAX_ATTEMPTS {
-            let backoff = MEDIA_DOWNLOAD_INITIAL_BACKOFF * attempt;
-            if let Some(remaining) = MEDIA_DOWNLOAD_OVERALL_TIMEOUT.checked_sub(started.elapsed()) {
-                tokio::time::sleep(std::cmp::min(backoff, remaining)).await;
-            }
-        }
-    }
-
-    let detail = last_error.unwrap_or_else(|| "no peer attempts completed".to_string());
-    Err(anyhow::anyhow!(
-        "Unable to download hash {} from any peer after {} media attempts; last error: {}",
-        hash,
-        MEDIA_DOWNLOAD_MAX_ATTEMPTS,
-        detail
-    )
-    .into())
-}
 
 pub fn scope() -> Scope {
     web::scope("/media")
@@ -163,7 +64,12 @@ async fn list_files(path: web::Path<GroupRepoPath>) -> AppResult<impl Responder>
         match repo.get_hash_from_dht().await {
             Ok(hash) => {
                 if !group.has_hash(&hash).await? {
-                    download_hash_for_media(group.as_ref(), &hash).await?;
+                    group
+                        .download_hash_from_peers_with_timeout(
+                            &hash,
+                            Some(MEDIA_DOWNLOAD_OVERALL_TIMEOUT),
+                        )
+                        .await?;
                 }
             }
             Err(err) => {
@@ -216,7 +122,12 @@ async fn download_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<impl Re
     if !repo.can_write() {
         let collection_hash = repo.get_hash_from_dht().await?;
         if !group.has_hash(&collection_hash).await? {
-            download_hash_for_media(group.as_ref(), &collection_hash).await?;
+            group
+                .download_hash_from_peers_with_timeout(
+                    &collection_hash,
+                    Some(MEDIA_DOWNLOAD_OVERALL_TIMEOUT),
+                )
+                .await?;
         }
     }
 
@@ -224,7 +135,9 @@ async fn download_file(path: web::Path<GroupRepoMediaPath>) -> AppResult<impl Re
     let file_hash = repo.get_file_hash(file_name).await?;
 
     if !group.has_hash(&file_hash).await? {
-        download_hash_for_media(group.as_ref(), &file_hash).await?;
+        group
+            .download_hash_from_peers_with_timeout(&file_hash, Some(MEDIA_DOWNLOAD_OVERALL_TIMEOUT))
+            .await?;
     }
     // Trigger file download from peers using the hash
     let file_data = repo.get_file_stream(file_name).await?;
