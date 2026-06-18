@@ -1,9 +1,8 @@
 #![allow(clippy::result_large_err)] // Allows for larger error types in Result
 
-use jni::objects::{GlobalRef, JClass};
-use jni::AttachGuard;
-use jni::JNIEnv;
-use jni::JavaVM;
+use jni::objects::{Global, JClass};
+use jni::vm::JavaVM;
+use jni::Env;
 use once_cell::sync::Lazy;
 use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex, Once};
@@ -28,23 +27,22 @@ pub enum JniError {
 pub type JniResult<T> = StdResult<T, JniError>;
 
 static JAVA_VM: Lazy<Arc<Mutex<Option<JavaVM>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
-static CLASS: Lazy<Arc<Mutex<Option<GlobalRef>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+static CLASS: Lazy<Arc<Mutex<Option<Global<JClass<'static>>>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(None)));
 static INIT: Once = Once::new();
 
 #[allow(dead_code)]
 pub fn get_java_vm() -> JniResult<JavaVM> {
-    let jvm_locked = JAVA_VM.lock();
-    let jvm = jvm_locked.as_ref().unwrap();
-    let env = jvm
+    let jvm_locked = JAVA_VM
+        .lock()
+        .map_err(|e| JniError::InitializationError(format!("Failed to acquire JavaVM lock: {e}")))?;
+    jvm_locked
         .as_ref()
-        .unwrap()
-        .attach_current_thread_as_daemon()
-        .unwrap();
-    let vm = env.get_java_vm();
-    return Ok(vm?);
+        .cloned()
+        .ok_or_else(|| JniError::InitializationError("JavaVM not initialized".into()))
 }
 
-pub fn init_jni(env: &JNIEnv, class: JClass) -> JniResult<()> {
+pub fn init_jni(env: &mut Env, class: JClass) -> JniResult<()> {
     INIT.call_once(|| {
         if let Err(e) = init_jni_inner(env, class) {
             eprintln!("Failed to initialize JNI: {e}");
@@ -53,7 +51,7 @@ pub fn init_jni(env: &JNIEnv, class: JClass) -> JniResult<()> {
     Ok(())
 }
 
-fn init_jni_inner(env: &JNIEnv, class: JClass) -> JniResult<()> {
+fn init_jni_inner(env: &mut Env, class: JClass) -> JniResult<()> {
     let java_vm = env.get_java_vm()?;
     let global_class = env.new_global_ref(class)?;
 
@@ -79,7 +77,7 @@ where
 #[allow(dead_code)]
 pub fn with_class<F, R>(f: F) -> JniResult<R>
 where
-    F: FnOnce(&GlobalRef) -> JniResult<R>,
+    F: FnOnce(&Global<JClass<'static>>) -> JniResult<R>,
 {
     let class_guard = CLASS
         .lock()
@@ -103,7 +101,7 @@ where
 
 pub fn with_env<F, R>(f: F) -> JniResult<R>
 where
-    F: FnOnce(AttachGuard) -> JniResult<R>,
+    F: FnOnce(&mut Env) -> JniResult<R>,
 {
     let vm_guard = JAVA_VM
         .lock()
@@ -113,9 +111,6 @@ where
         .as_ref()
         .ok_or_else(|| JniError::InitializationError("JavaVM not initialized".into()))?;
 
-    let env = vm
-        .attach_current_thread()
-        .map_err(|e| JniError::ThreadAttachError(format!("Failed to attach thread: {e}")))?;
-
-    f(env)
+    vm.attach_current_thread(f)
+        .map_err(|e| JniError::ThreadAttachError(format!("Failed to attach thread: {e}")))
 }

@@ -5809,7 +5809,7 @@ dependencies = [
  "futures",
  "hickory-resolver",
  "iroh-blobs",
- "jni 0.21.1",
+ "jni 0.22.4",
  "lazy_static",
  "log",
  "num_cpus",

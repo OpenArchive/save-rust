@@ -3,15 +3,26 @@
 clear
 
 # Auto-detect Android SDK if not provided
-if [ -z "$ANDROID_HOME" ] && [ -d "$HOME/Android/Sdk" ]; then
-  export ANDROID_HOME="$HOME/Android/Sdk"
+if [ -z "$ANDROID_HOME" ]; then
+  if [ -d "$HOME/Android/Sdk" ]; then
+    export ANDROID_HOME="$HOME/Android/Sdk"
+  elif [ -d "$HOME/Library/Android/sdk" ]; then
+    export ANDROID_HOME="$HOME/Library/Android/sdk"
+  fi
 fi
 
 # Auto-detect Android NDK if not provided
-if [ -z "$ANDROID_NDK_HOME" ] && [ -d "$HOME/Android/Sdk/ndk" ]; then
-  NDK_LATEST="$(ls -1 "$HOME/Android/Sdk/ndk" 2>/dev/null | sort -V | tail -n 1)"
-  if [ -n "$NDK_LATEST" ] && [ -d "$HOME/Android/Sdk/ndk/$NDK_LATEST" ]; then
-    export ANDROID_NDK_HOME="$HOME/Android/Sdk/ndk/$NDK_LATEST"
+if [ -z "$ANDROID_NDK_HOME" ] && [ -n "$ANDROID_HOME" ] && [ -d "$ANDROID_HOME/ndk" ]; then
+  NDK_LATEST=""
+  for ndk_dir in "$ANDROID_HOME/ndk"/*/; do
+    [ -d "$ndk_dir" ] || continue
+    candidate="$(basename "$ndk_dir")"
+    if [ -z "$NDK_LATEST" ] || [ "$(printf '%s\n' "$NDK_LATEST" "$candidate" | sort -V | tail -n 1)" = "$candidate" ]; then
+      NDK_LATEST="$candidate"
+    fi
+  done
+  if [ -n "$NDK_LATEST" ] && [ -d "$ANDROID_HOME/ndk/$NDK_LATEST" ]; then
+    export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_LATEST"
   fi
 fi
 
