@@ -46,20 +46,18 @@ mkdir -p $JNI_DIR
 #
 # cargo update save-dweb-backend
 
-# Add this target if we need to support older devices.
-# armv7-linux-androideabi
-#
+# arm64-v8a: modern 64-bit ARM devices (primary production ABI)
+# armv7-linux-androideabi: older 32-bit ARM devices (armeabi-v7a)
+# x86_64-linux-android: emulators and x86_64 devices (dev/CI)
 rustup target add \
         aarch64-linux-android \
+        armv7-linux-androideabi \
         x86_64-linux-android
 
 # Build the android libraries in the jniLibs directory
-#
-# Add this target if we need to support older devices.
-# armeabi-v7a
-#
 cargo ndk -o $JNI_DIR \
         --manifest-path ../Cargo.toml \
         -t arm64-v8a \
+        -t armeabi-v7a \
         -t x86_64 \
         build --release
