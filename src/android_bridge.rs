@@ -67,7 +67,11 @@ pub extern "system" fn Java_net_opendasharchive_openarchive_services_snowbird_Sn
         })
         .resolve::<ThrowRuntimeExAndDefault>();
 
-    // Use another new JNIEnv for veilid_core_setup_android
+    // resolve() throws to Java and returns null on failure; do not start Veilid or the server.
+    if output.is_null() {
+        return output;
+    }
+
     veilid_core_setup_android(env, context);
 
     std::thread::spawn(move || {
