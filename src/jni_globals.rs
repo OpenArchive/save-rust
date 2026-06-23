@@ -3,9 +3,9 @@
 use jni::objects::{Global, JClass};
 use jni::vm::JavaVM;
 use jni::Env;
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 use std::result::Result as StdResult;
-use std::sync::{Arc, Mutex, Once};
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -29,13 +29,13 @@ pub type JniResult<T> = StdResult<T, JniError>;
 static JAVA_VM: Lazy<Arc<Mutex<Option<JavaVM>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
 static CLASS: Lazy<Arc<Mutex<Option<Global<JClass<'static>>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
-static INIT: Once = Once::new();
+static INIT: OnceCell<()> = OnceCell::new();
 
 #[allow(dead_code)]
 pub fn get_java_vm() -> JniResult<JavaVM> {
-    let jvm_locked = JAVA_VM
-        .lock()
-        .map_err(|e| JniError::InitializationError(format!("Failed to acquire JavaVM lock: {e}")))?;
+    let jvm_locked = JAVA_VM.lock().map_err(|e| {
+        JniError::InitializationError(format!("Failed to acquire JavaVM lock: {e}"))
+    })?;
     jvm_locked
         .as_ref()
         .cloned()
@@ -43,12 +43,8 @@ pub fn get_java_vm() -> JniResult<JavaVM> {
 }
 
 pub fn init_jni(env: &mut Env, class: JClass) -> JniResult<()> {
-    INIT.call_once(|| {
-        if let Err(e) = init_jni_inner(env, class) {
-            eprintln!("Failed to initialize JNI: {e}");
-        }
-    });
-    Ok(())
+    INIT.get_or_try_init(|| init_jni_inner(env, class))
+        .map(|_| ())
 }
 
 fn init_jni_inner(env: &mut Env, class: JClass) -> JniResult<()> {
