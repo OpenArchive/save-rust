@@ -1,6 +1,6 @@
 [package]
 name = "save"
-version = "0.2.6"
+version = "0.2.7"
 description = "Decentralized Web for Save"
 edition = "2021"
 publish = false
