@@ -176,6 +176,12 @@ mod tests {
         }
     }
 
+    fn is_transient_veilid_ready_error(body: &str) -> bool {
+        body.contains("couldn't look up relay")
+            || body.contains("TryAgain: offline")
+            || body.contains("offline, try again later")
+    }
+
     fn apply_test_network_overrides(config: &mut VeilidConfig) {
         if !env_flag("SAVE_VEILID_LOCAL_TEST_MODE") {
             return;
@@ -191,7 +197,8 @@ mod tests {
         // Keep test nodes deterministic and less noisy in CI.
         config.network.upnp = false;
         config.network.detect_address_changes = Some(false);
-        config.network.restricted_nat_retries = 0;
+        // restricted_nat_retries moved to internal "footgun" config in Veilid 0.5.4 and
+        // now defaults to 0 (the value we used to force here), so no override is needed.
 
         if let Some(bootstrap) = csv_env("SAVE_VEILID_TEST_BOOTSTRAP") {
             config.network.routing_table.bootstrap = bootstrap;
@@ -361,7 +368,7 @@ mod tests {
             } else {
                 let body_text = String::from_utf8_lossy(&body).to_string();
                 last_create_group_error = format!("status={resp_status}, body={body_text}");
-                if !body_text.contains("couldn't look up relay") {
+                if !is_transient_veilid_ready_error(&body_text) {
                     break;
                 }
             }
@@ -383,13 +390,46 @@ mod tests {
 
         assert_eq!(resp.repos.len(), 0, "Should have no repos at first");
 
-        let req = test::TestRequest::post()
-            .uri(format!("/api/groups/{}/repos", group.key).as_str())
-            .set_json(RequestName {
-                name: "example repo".to_string(),
-            })
-            .to_request();
-        let repo: SnowbirdRepo = test::call_and_read_body_json(&app, req).await;
+        let mut repo_opt: Option<SnowbirdRepo> = None;
+        let mut last_create_repo_error = String::new();
+        for attempt in 1..=6 {
+            let req = test::TestRequest::post()
+                .uri(format!("/api/groups/{}/repos", group.key).as_str())
+                .set_json(RequestName {
+                    name: "example repo".to_string(),
+                })
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            let resp_status = resp.status();
+            let body = test::read_body(resp).await;
+            let body_text = String::from_utf8_lossy(&body).to_string();
+
+            if resp_status.is_success() {
+                match serde_json::from_slice::<SnowbirdRepo>(&body) {
+                    Ok(repo) => {
+                        repo_opt = Some(repo);
+                        break;
+                    }
+                    Err(e) => {
+                        last_create_repo_error =
+                            format!("invalid success payload: {e}; body={body_text}");
+                    }
+                }
+            } else {
+                last_create_repo_error = format!("status={resp_status}, body={body_text}");
+            }
+
+            if !is_transient_veilid_ready_error(&body_text) {
+                break;
+            }
+
+            if attempt < 6 {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        }
+        let repo = repo_opt.unwrap_or_else(|| {
+            panic!("Creating repo failed after retries: {last_create_repo_error}")
+        });
 
         assert_eq!(repo.name, "example repo".to_string());
 
@@ -418,27 +458,90 @@ mod tests {
         .await;
 
         // Step 1: Create a group via the API
-        let create_group_req = test::TestRequest::post()
-            .uri("/api/groups")
-            .set_json(json!({ "name": "Test Group" }))
-            .to_request();
-        let create_group_resp: serde_json::Value =
-            test::call_and_read_body_json(&app, create_group_req).await;
-        let group_id = create_group_resp["key"]
-            .as_str()
-            .expect("No group key returned");
+        let mut group_id_opt: Option<String> = None;
+        let mut last_create_group_error = String::new();
+        for attempt in 1..=6 {
+            let create_group_req = test::TestRequest::post()
+                .uri("/api/groups")
+                .set_json(json!({ "name": "Test Group" }))
+                .to_request();
+            let create_group_resp = test::call_service(&app, create_group_req).await;
+            let resp_status = create_group_resp.status();
+            let body = test::read_body(create_group_resp).await;
+            let body_text = String::from_utf8_lossy(&body).to_string();
+
+            if resp_status.is_success() {
+                match serde_json::from_slice::<serde_json::Value>(&body) {
+                    Ok(value) => {
+                        if let Some(group_id) = value["key"].as_str() {
+                            group_id_opt = Some(group_id.to_string());
+                            break;
+                        }
+                        last_create_group_error = format!("missing key in body={body_text}");
+                    }
+                    Err(e) => {
+                        last_create_group_error =
+                            format!("invalid success payload: {e}; body={body_text}");
+                    }
+                }
+            } else {
+                last_create_group_error = format!("status={resp_status}, body={body_text}");
+            }
+
+            if !is_transient_veilid_ready_error(&body_text) {
+                break;
+            }
+
+            if attempt < 6 {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        }
+        let group_id = group_id_opt.unwrap_or_else(|| {
+            panic!("Creating group failed after retries: {last_create_group_error}")
+        });
 
         // Step 2: Create a repo via the API
-        let create_repo_req = test::TestRequest::post()
-            .uri(&format!("/api/groups/{group_id}/repos"))
-            .set_json(json!({ "name": "Test Repo" }))
-            .to_request();
-        let create_repo_resp: serde_json::Value =
-            test::call_and_read_body_json(&app, create_repo_req).await;
+        let mut repo_id_opt: Option<String> = None;
+        let mut last_create_repo_error = String::new();
+        for attempt in 1..=6 {
+            let create_repo_req = test::TestRequest::post()
+                .uri(&format!("/api/groups/{group_id}/repos"))
+                .set_json(json!({ "name": "Test Repo" }))
+                .to_request();
+            let create_repo_resp = test::call_service(&app, create_repo_req).await;
+            let resp_status = create_repo_resp.status();
+            let body = test::read_body(create_repo_resp).await;
+            let body_text = String::from_utf8_lossy(&body).to_string();
 
-        let repo_id = create_repo_resp["key"]
-            .as_str()
-            .expect("No repo key returned");
+            if resp_status.is_success() {
+                match serde_json::from_slice::<serde_json::Value>(&body) {
+                    Ok(value) => {
+                        if let Some(repo_id) = value["key"].as_str() {
+                            repo_id_opt = Some(repo_id.to_string());
+                            break;
+                        }
+                        last_create_repo_error = format!("missing key in body={body_text}");
+                    }
+                    Err(e) => {
+                        last_create_repo_error =
+                            format!("invalid success payload: {e}; body={body_text}");
+                    }
+                }
+            } else {
+                last_create_repo_error = format!("status={resp_status}, body={body_text}");
+            }
+
+            if !is_transient_veilid_ready_error(&body_text) {
+                break;
+            }
+
+            if attempt < 6 {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        }
+        let repo_id = repo_id_opt.unwrap_or_else(|| {
+            panic!("Creating repo failed after retries: {last_create_repo_error}")
+        });
 
         // Step 3: List files before upload; empty repos should not fail with a DHT error.
         let empty_list_files_req = test::TestRequest::get()
