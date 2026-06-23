@@ -191,7 +191,8 @@ mod tests {
         // Keep test nodes deterministic and less noisy in CI.
         config.network.upnp = false;
         config.network.detect_address_changes = Some(false);
-        config.network.restricted_nat_retries = 0;
+        // restricted_nat_retries moved to internal "footgun" config in Veilid 0.5.4 and
+        // now defaults to 0 (the value we used to force here), so no override is needed.
 
         if let Some(bootstrap) = csv_env("SAVE_VEILID_TEST_BOOTSTRAP") {
             config.network.routing_table.bootstrap = bootstrap;
