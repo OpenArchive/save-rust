@@ -109,6 +109,13 @@ git tag v<new-version>
 git push "$RELEASE_REMOTE" v<new-version>
 ```
 
+7. Publish the GitHub Release from that tag. These repos keep a Release per tag, and a pushed git tag does NOT appear on the Releases page on its own. Only create a Release for a tag that is already on the merged default branch (never for an open PR). Match the repo's existing release-title convention:
+
+```bash
+gh release list --repo OpenArchive/<repo>        # confirm the title convention, e.g. "<repo> vX.Y.Z"
+gh release create v<new-version> --repo OpenArchive/<repo> --title "<repo> v<new-version>" --notes "..."
+```
+
 The next repo must not point at an upstream tag until that tag exists remotely.
 
 ## Final save-rust Release
@@ -119,7 +126,7 @@ Run the same loop for `save-rust`. Use the repo convention for the release commi
 chore: release v0.2.x
 ```
 
-Tag and push the final `save-rust` release after its PR merges.
+After its PR merges, tag and push the final `save-rust` release, then publish the GitHub Release (step 7). Create the Release only once every PR for this upgrade has merged, so it reflects the final merged state.
 
 ## Verification
 
