@@ -30,7 +30,7 @@ The downstream repo must not be updated until the upstream repo has a merged PR 
 The current compatibility workaround is:
 
 - `hickory-resolver = "=0.25.2"`
-- `tripledoublev/iroh` patch entries under `[patch.crates-io]`
+- iroh patch entries under `[patch.crates-io]`
 
 Keep this workaround during routine Veilid bumps unless the target Veilid changelog or `veilid-tools/Cargo.toml` proves the resolver constraint has been relaxed. If it has been relaxed, remove the workaround as a separate PR unless the user explicitly asks to combine it.
 
@@ -70,7 +70,7 @@ Expected dependency surfaces:
 - package version, currently in the `0.3.x` line
 - `veilid-core` git tag from `https://gitlab.com/veilid/veilid.git`
 - `hickory-resolver = "=0.25.2"`
-- `[patch.crates-io] iroh-net` from `https://github.com/tripledoublev/iroh.git`
+- `[patch.crates-io] iroh-net` from `https://github.com/OpenArchive/iroh.git` after fork-origin migration, or the current manifest URL if migration has not landed yet
 
 Routine edit:
 
@@ -113,9 +113,9 @@ Expected dependency surfaces:
 - package version, currently in the `0.3.x` line
 - `veilid-core` git tag from `https://gitlab.com/veilid/veilid.git`
 - `veilid-tools` git tag from `https://gitlab.com/veilid/veilid.git`
-- `veilid-iroh-blobs` git tag from `https://github.com/RangerMauve/veilid-iroh-blobs` unless the OpenArchive fork migration has already happened
+- `veilid-iroh-blobs` git tag from `https://github.com/OpenArchive/veilid-iroh-blobs` after fork-origin migration, or the current manifest URL if migration has not landed yet
 - `hickory-resolver = "=0.25.2"`
-- seven `[patch.crates-io]` iroh workspace crates from `https://github.com/tripledoublev/iroh.git`
+- seven `[patch.crates-io]` iroh workspace crates from `https://github.com/OpenArchive/iroh.git` after fork-origin migration, or the current manifest URL if migration has not landed yet
 
 Routine edit:
 
@@ -171,7 +171,7 @@ Expected dependency surfaces:
 - `veilid-core` git tag from `https://gitlab.com/veilid/veilid.git`
 - an additional Android-target `veilid-core` dependency
 - `hickory-resolver = "=0.25.2"`
-- seven `[patch.crates-io]` iroh workspace crates from `https://github.com/tripledoublev/iroh.git`
+- seven `[patch.crates-io]` iroh workspace crates from `https://github.com/OpenArchive/iroh.git` after fork-origin migration, or the current manifest URL if migration has not landed yet
 
 Routine edit:
 
@@ -209,7 +209,7 @@ Release:
 
 Do this only as a standalone change unless the user explicitly asks otherwise.
 
-Potential future URLs:
+OpenArchive fork URLs:
 
 - `https://github.com/OpenArchive/veilid-iroh-blobs`
 - `https://github.com/OpenArchive/iroh.git`

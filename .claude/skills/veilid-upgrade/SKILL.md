@@ -23,14 +23,19 @@ Read `references/dependency-map.md` before editing. It contains the repo-specifi
 
 ## One-Time Fork Migration
 
-The chain currently depends on personal upstream forks:
+The chain historically depended on personal upstream forks:
 
 - `RangerMauve/veilid-iroh-blobs`
 - `tripledoublev/iroh`
 
-Best practice is to fork them under `OpenArchive` and repoint references in a standalone PR before or after the Veilid upgrade. Do not mix that origin migration into the Veilid bump unless the user asks.
+OpenArchive forks now exist and should be the long-term dependency sources:
 
-Until the migration is done, operate against the current upstreams listed in the manifests.
+- `OpenArchive/veilid-iroh-blobs`
+- `OpenArchive/iroh`
+
+Repoint references in standalone PRs before or after a Veilid upgrade. Do not mix that origin migration into the Veilid bump unless the user asks.
+
+Until a repo's migration PR is merged, operate against the current upstreams listed in that repo's manifest.
 
 ## Step 0: Verify The Target Veilid Tag
 
