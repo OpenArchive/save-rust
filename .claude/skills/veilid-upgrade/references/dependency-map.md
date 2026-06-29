@@ -134,14 +134,18 @@ cargo nextest run
 
 If any `-p` target fails because the package is absent or ambiguous, run narrower `cargo update -p` commands or a full `cargo update`, then inspect `Cargo.lock`.
 
-Smoke-test workflow:
+Test workflow — save-dweb-backend's CI runs the full suite, so run it all. `.config/nextest.toml` already serializes and retries the flaky Veilid P2P/DHT tests:
+
+```bash
+cargo nextest run
+```
+
+To narrow to specific tests, discover names first and pass them as a filter EXPRESSION with `-E`. A bare quoted string WITHOUT `-E` is a substring match and silently runs 0 tests:
 
 ```bash
 cargo nextest list
-cargo nextest run 'test(basic_test) | test(test_health_endpoint) | test(test_upload_list_delete)'
+cargo nextest run -E 'test(parse_url_rejects_malformed_url)'
 ```
-
-Only use exact test filters after confirming the names still exist.
 
 Release handoff:
 
@@ -190,11 +194,11 @@ cargo nextest run
 
 If any `-p` target fails because the package is absent or ambiguous, run narrower `cargo update -p` commands or a full `cargo update`, then inspect `Cargo.lock`.
 
-Smoke-test workflow:
+Smoke-test workflow — match CI's smoke set. Pass the filter as an EXPRESSION with `-E`; without `-E` the quoted string is a substring match and silently runs 0 tests:
 
 ```bash
 cargo nextest list
-cargo nextest run 'test(basic_test) | test(test_health_endpoint) | test(test_upload_list_delete)'
+cargo nextest run -E 'test(basic_test) | test(test_health_endpoint) | test(test_upload_list_delete)'
 ```
 
 Only use exact test filters after confirming the names still exist.

@@ -98,9 +98,10 @@ cargo test -- --list
 - Open a PR to the repo's default branch.
 - Stop and ask the human to review and merge.
 
-6. After merge, tag the release before continuing downstream:
+6. After merge, switch to the repo's default branch and fast-forward before tagging — the feature branch does not contain the squash/merge commit, so tagging without checking out the default branch tags the wrong commit:
 
 ```bash
+git checkout <default-branch>   # usually 'main'; veilid-iroh-blobs uses 'default'
 git pull --ff-only
 git tag v<new-version>
 git push origin v<new-version>
@@ -124,9 +125,9 @@ Tag and push the final `save-rust` release after its PR merges.
 - `Cargo.lock` in each repo records the expected Veilid commit hash for the target tag.
 - Downstream repos point at the freshly pushed upstream release tags.
 - In `save-rust`, verify the new `save-dweb-backend` tag/hash and Veilid hash in `Cargo.lock`.
-- Search all three manifests for stale old tags, replacing `OLD_VEILID_REGEX` with the previous Veilid version escaped for regex, for example `0\.5\.5`:
+- Search all three manifests for the PREVIOUS Veilid version (the one you upgraded FROM), escaped for regex — it should return nothing. Set `OLD_VEILID` to that concrete version; e.g. for a 0.5.5 → 0.5.6 bump use `0\.5\.5` (the unanchored match also covers the `v0.5.5` tag form):
 
 ```bash
-OLD_VEILID_REGEX='0\.5\.x'
-rg "${OLD_VEILID_REGEX}|v${OLD_VEILID_REGEX}" ../veilid-iroh-blobs/Cargo.toml ../save-dweb-backend/Cargo.toml Cargo.toml
+OLD_VEILID='0\.5\.5'
+rg "${OLD_VEILID}" ../veilid-iroh-blobs/Cargo.toml ../save-dweb-backend/Cargo.toml Cargo.toml
 ```
