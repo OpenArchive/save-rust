@@ -220,8 +220,9 @@ OpenArchive fork URLs:
 
 Migration checklist:
 
-1. Update the `veilid-iroh-blobs` git URL in `save-dweb-backend`.
-2. Update every `[patch.crates-io]` iroh entry in all three repos.
-3. Refresh lockfiles without changing Veilid tags.
+1. Update the `veilid-iroh-blobs` git URL in `save-dweb-backend` (and any other direct consumer) to the OpenArchive fork.
+2. Update every `[patch.crates-io]` iroh entry in all three repos to `OpenArchive/iroh`.
+3. Refresh lockfiles so the source hashes repoint to the OpenArchive forks. Do NOT change the **Veilid version tags** — `veilid-core`/`veilid-tools` stay on their current `vX.Y.Z`.
 4. Build and test all affected repos.
-5. Open a focused PR that only changes fork origins and lockfile source hashes.
+5. Keep each repo's diff focused on fork origins + lockfile source hashes — no Veilid version change.
+6. Separate from the Veilid tags above, you will likely need to cut **new wrapper-crate release tags** so downstream repos can consume the merged fork-origin commits. Never move an existing pushed tag — instead bump the wrapper package `version` and tag the new version: e.g. release `veilid-iroh-blobs` (bump `version`, tag `v0.3.x`) after its migration merges, then `save-dweb-backend` (bump `version`, tag `v0.3.y`), repointing each downstream git tag the same way the Veilid cascade does. This is a wrapper-crate release bump, distinct from a Veilid version change.

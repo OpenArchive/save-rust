@@ -98,13 +98,15 @@ cargo test -- --list
 - Open a PR to the repo's default branch.
 - Stop and ask the human to review and merge.
 
-6. After merge, switch to the repo's default branch and fast-forward before tagging — the feature branch does not contain the squash/merge commit, so tagging without checking out the default branch tags the wrong commit:
+6. After merge, switch to the repo's default branch and fast-forward before tagging — the feature branch does not contain the squash/merge commit, so tagging without checking out the default branch tags the wrong commit. Do NOT assume `origin` is the release repo: the local `origin` may not point at it (e.g. veilid-iroh-blobs often has `origin` = RangerMauve and a separate `openarchive` remote = OpenArchive). Confirm with `git remote -v` and push the tag to the remote the PR actually merged into:
 
 ```bash
-git checkout <default-branch>   # usually 'main'; veilid-iroh-blobs uses 'default'
-git pull --ff-only
+git remote -v                          # identify the release remote (the merged-into repo)
+RELEASE_REMOTE=origin                  # set to the verified release remote, e.g. openarchive
+git checkout <default-branch>          # usually 'main'; veilid-iroh-blobs uses 'default'
+git pull --ff-only "$RELEASE_REMOTE" <default-branch>
 git tag v<new-version>
-git push origin v<new-version>
+git push "$RELEASE_REMOTE" v<new-version>
 ```
 
 The next repo must not point at an upstream tag until that tag exists remotely.
