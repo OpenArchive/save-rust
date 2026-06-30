@@ -27,12 +27,19 @@ RUST_MIN_STACK=8388608 cargo nextest run --test-threads=1 --no-fail-fast
 
 To run in the background and inspect later: `RUST_MIN_STACK=8388608 cargo nextest run --test-threads=1 --no-fail-fast 2>&1 | tee test_output.log`
 
+## Architecture & handoff
+
+New to this project? Start with [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) —
+a general maintainer overview of the whole Rust stack (`save-rust` +
+`save-dweb-backend` + `veilid-iroh-blobs`): how the pieces fit, build, test, and
+release.
+
 ## Veilid upgrades
 
 Veilid upgrades are coordinated across sibling repositories in dependency order:
 `veilid-iroh-blobs` -> `save-dweb-backend` -> `save-rust`.
 
-Use the repo-local runbook before changing Veilid or related fork pins:
+Before changing Veilid or related fork pins, follow the repo-local runbook at
 `.claude/skills/veilid-upgrade/SKILL.md`.
 
 # API Documentation
