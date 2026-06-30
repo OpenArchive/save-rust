@@ -72,6 +72,8 @@ Expected dependency surfaces:
 - `hickory-resolver = "=0.25.2"`
 - `[patch.crates-io] iroh-net` from `https://github.com/OpenArchive/iroh.git` after fork-origin migration, or the current manifest URL if migration has not landed yet
 
+Known release-history exception: `OpenArchive/veilid-iroh-blobs` tag `v0.3.8` contains the fork-origin migration but its `Cargo.toml` package version remains `0.3.7`. Do not move or force-push that pushed tag. Before the next wrapper release, check existing remote tags and choose the next unused package/tag version; this will likely be `0.3.9` unless the team explicitly accepts another mismatch.
+
 Routine edit:
 
 - Update all `veilid-core` tag occurrences to the target Veilid tag.

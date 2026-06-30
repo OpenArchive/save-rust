@@ -27,9 +27,13 @@ RUST_MIN_STACK=8388608 cargo nextest run --test-threads=1 --no-fail-fast
 
 To run in the background and inspect later: `RUST_MIN_STACK=8388608 cargo nextest run --test-threads=1 --no-fail-fast 2>&1 | tee test_output.log`
 
-## Veilid dependency patch
+## Veilid upgrades
 
-The project temporarily patches `veilid-core` `v0.5.1` via the `[patch."https://gitlab.com/veilid/veilid.git"]` section in `Cargo.toml`. This redirects Cargo to the `tripledoublev/veilid` `fix-underflow` branch that addresses an underflow bug observed during testing. Keep this override until an upstream release includes the fix, then remove the patch stanza and run `cargo update -p veilid-core`.
+Veilid upgrades are coordinated across sibling repositories in dependency order:
+`veilid-iroh-blobs` -> `save-dweb-backend` -> `save-rust`.
+
+Use the repo-local runbook before changing Veilid or related fork pins:
+`.claude/skills/veilid-upgrade/SKILL.md`.
 
 # API Documentation
 
